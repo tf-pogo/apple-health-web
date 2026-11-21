@@ -594,13 +594,12 @@ function viewOverview(r, host) {
     ['mobility', '移动', dec(gv(r.gait.speed), 2) + ' km/h',
       '步长 ' + dec(gv(r.gait.stepLen), 1) + ' cm · 双支撑 ' + dec(gv(r.gait.dblSup) * 100, 1) + '% · 上楼 ' + dec(gv(r.gait.asc), 2) + ' m/s'],
   ];
-  h += card('各分区速览', '点一行进那个分区',
-    '<div class="quick-list">' + quick.map(q =>
-      '<a class="quick" data-go="' + q[0] + '">' +
-        '<span class="qname">' + q[1] + '</span>' +
-        '<b class="qval">' + esc(q[2]) + '</b>' +
-        '<span class="qsub">' + esc(q[3]) + '</span>' +
-        '<span class="qgo">→</span>' +
+  h += card('各分区速览', '点一张进那个分区',
+    '<div class="facts quickgrid">' + quick.map(q =>
+      '<a class="fact quick" data-go="' + q[0] + '">' +
+        '<span class="qk">' + q[1] + '<span class="qgo">→</span></span>' +
+        '<b class="qv">' + esc(q[2]) + '</b>' +
+        '<span class="qs">' + esc(q[3]) + '</span>' +
       '</a>').join('') + '</div>',
     '');
 
