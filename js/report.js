@@ -135,6 +135,29 @@ function sref(key, v) {
   '</div>';
 }
 function card(title, sub, body, note) { return '<div class="card"><h3>' + title + (sub ? ' <span>' + sub + '</span>' : '') + '</h3>' + body + (note ? '<p class="note">' + note + '</p>' : '') + '</div>'; }
+
+/** 在 byDay 里找出某个字段最大/最小的那天。minV 用来剔除「那天没记」的 0 */
+function dayPeak(byDay, key, dir, minV) {
+  const floor = minV === undefined ? 1e-9 : minV;
+  let best = null;
+  for (const d in byDay) {
+    const v = byDay[d][key];
+    if (!(v > floor)) continue;
+    if (!best || (dir === 'max' ? v > best.v : v < best.v)) best = { d: d, v: v };
+  }
+  return best;
+}
+
+/** 极值小卡：值 + 单位 + 一句话 + 日期。和「换个说法」共用 .fact 样式，
+ *  items 每项是 [值, 单位, 名字, 日期] */
+function factsHTML(items) {
+  return '<div class="facts">' + items.map(x =>
+    '<div class="fact">' +
+      '<div class="fv">' + esc(x[0]) + (x[1] ? '<span class="fu">' + esc(x[1]) + '</span>' : '') + '</div>' +
+      '<div class="fk">' + esc(x[2]) + '</div>' +
+      '<div class="fs">' + esc(x[3] || '—') + '</div>' +
+    '</div>').join('') + '</div>';
+}
 function table(head, rows, opts) {
   const tight = opts && opts.tight ? ' tight' : '';
   let h = '<div class="table-wrap"><table class="data' + tight + '"><thead><tr>' + head.map(x => '<th' + (x[1] ? ' class="' + x[1] + '"' : '') + '>' + x[0] + '</th>').join('') + '</tr></thead><tbody>';
@@ -909,14 +932,7 @@ function viewOverview(r, host) {
     [hiEff ? dec(hiEff.v, 2) : '—', '', '身体负荷最高', hiEff ? hiEff.d : ''],
     [loSpo2 ? String(loSpo2.v) : '—', '%', '血氧最低', loSpo2 ? loSpo2.d : ''],
   ];
-  h += card('这段时间的几个极值', '都是真出现过的一次，不是平均值',
-    '<div class="facts">' + ex.map(x =>
-      '<div class="fact">' +
-        '<div class="fv">' + esc(x[0]) + (x[1] ? '<span class="fu">' + x[1] + '</span>' : '') + '</div>' +
-        '<div class="fk">' + esc(x[2]) + '</div>' +
-        '<div class="fs">' + esc(x[3] || '—') + '</div>' +
-      '</div>').join('') + '</div>',
-    '');
+  h += card('这段时间的几个极值', '都是真出现过的一次，不是平均值', factsHTML(ex), '');
 
   // 一天长什么样：睡觉那段、心跳的起伏、什么时候烧能量，全摊在同一条 24 小时轴上
   const realN = ns.filter(n => n.asleep >= 3);
@@ -1012,6 +1028,33 @@ function viewAudio(r, host) {
   h += card('每天的聆听时长', days + ' 天',
     '<div id="c-day" class="chart"></div>', '');
 
+  // 极值：最响的一天、听得最久的一天
+  const loudOne = dayPeak(r.byDay, 'hpMax', 'max');
+  let hiAvg = null, loAvg = null;
+  for (const d in r.byDay) {
+    const o = r.byDay[d];
+    if (!(o.hpN >= 30)) continue;
+    const v = o.hpS / o.hpN;
+    if (!hiAvg || v > hiAvg.v) hiAvg = { d: d, v: v };
+    if (!loAvg || v < loAvg.v) loAvg = { d: d, v: v };
+  }
+  const durHi = dayPeak(r.byDay, 'hpDur', 'max');
+  const durLo = dayPeak(r.byDay, 'hpDur', 'min', 1);
+  const overHi = dayPeak(r.byDay, 'hpO85', 'max');
+  const devTop = hp.devices.length ? hp.devices[0] : null;
+  let hourHi = 0;
+  for (let i = 1; i < hp.hourAvg.length; i++) if (hp.hourAvg[i] > hp.hourAvg[hourHi]) hourHi = i;
+  h += card('这段里的几个极值', '都是真出现过的一天，不是平均值', factsHTML([
+    [loudOne ? dec(loudOne.v, 1) : '—', 'dB', '听得最响的一次', loudOne ? loudOne.d : ''],
+    [hiAvg ? dec(hiAvg.v, 1) : '—', 'dB', '平均音量最高的一天', hiAvg ? hiAvg.d : ''],
+    [loAvg ? dec(loAvg.v, 1) : '—', 'dB', '平均音量最低的一天', loAvg ? loAvg.d : ''],
+    [durHi ? dec(durHi.v / 60, 1) : '—', '小时', '单日听得最久的一天', durHi ? durHi.d : ''],
+    [durLo ? Math.round(durLo.v) : '—', '分钟', '单日听得最少的一天', durLo ? durLo.d : ''],
+    [overHi ? num(overHi.v) : '—', '次', '超标最多的一天', overHi ? overHi.d + ' · 超 85 dB' : ''],
+    [devTop ? dec(devTop.hours, 0) : '—', '小时', '用得最多的一副', devTop ? devTop.name : ''],
+    [hourHi + ' 点前后', '', '一天里最响的钟点', '平均 ' + dec(hp.hourAvg[hourHi], 1) + ' dB'],
+  ]), '');
+
   host.innerHTML = h;
   mount('#c-dev', C.hbarsHTML(hp.devices.slice(0, 12).map(d => ({
     name: d.name, value: d.hours || d.n,
@@ -1089,7 +1132,7 @@ function viewHeart(r, host) {
     '<div id="c-hrcal"></div>',
     '一格是一天的平均心率，颜色越深跳得越忙。空白是没有记录的日子，不是没心跳。');
 
-  // 极值：这四行是「具体哪一天」，和上面的平均不是一回事
+  // 极值：这些是「具体哪一天」，和上面的平均不是一回事。凑成八项是为了排成 4×2
   const peakOf = (arr, cmp) => arr.reduce((best, x) => (!best || cmp(x, best) ? x : best), null);
   const hiDay = peakOf(hr.day, (a, b) => a[1] > b[1]);
   const loDay = peakOf(hr.day, (a, b) => a[1] < b[1]);
@@ -1097,19 +1140,27 @@ function viewHeart(r, host) {
   const rhrHi = peakOf(rhrDay, (a, b) => a[1] > b[1]);
   const rhrLo = peakOf(rhrDay, (a, b) => a[1] < b[1]);
   const mxRow = peakOf(Object.keys(r.byDay).map(d => [d, r.byDay[d].hrMax]), (a, b) => a[1] > b[1]);
+  // HRV 与血氧没有现成的「日」序列，直接按日聚合算
+  // pick() 出来的 byDay 里只有当日平均 hrv，没有 hrvSum/hrvN
+  const hrvDaily = Object.keys(r.byDay)
+    .map(d => (r.byDay[d].hrv ? [d, r.byDay[d].hrv] : null))
+    .filter(Boolean);
+  const hrvHi = peakOf(hrvDaily, (a, b) => a[1] > b[1]);
+  const hrvLo = peakOf(hrvDaily, (a, b) => a[1] < b[1]);
+  const spo2Row = peakOf(Object.keys(r.byDay)
+    .map(d => [d, r.byDay[d].spo2Min])
+    .filter(x => x[1] > 0), (a, b) => a[1] < b[1]);
   const ex = [
-    ['心跳最快的一刻', mxRow ? mxRow[1] + ' bpm' : '—', mxRow ? mxRow[0] : '—'],
-    ['日均最高的一天', hiDay ? hiDay[1] + ' bpm' : '—', hiDay ? hiDay[0] : '—'],
-    ['日均最低的一天', loDay ? loDay[1] + ' bpm' : '—', loDay ? loDay[0] : '—'],
-    ['静息心率最高', rhrHi ? rhrHi[1] + ' bpm' : '—', rhrHi ? rhrHi[0] : '—'],
-    ['静息心率最低', rhrLo ? rhrLo[1] + ' bpm' : '—', rhrLo ? rhrLo[0] : '—'],
+    [mxRow ? String(mxRow[1]) : '—', 'bpm', '心跳最快的一刻', mxRow ? mxRow[0] : ''],
+    [hiDay ? String(hiDay[1]) : '—', 'bpm', '日均最高的一天', hiDay ? hiDay[0] : ''],
+    [loDay ? String(loDay[1]) : '—', 'bpm', '日均最低的一天', loDay ? loDay[0] : ''],
+    [rhrHi ? String(rhrHi[1]) : '—', 'bpm', '静息最高的一天', rhrHi ? rhrHi[0] : ''],
+    [rhrLo ? String(rhrLo[1]) : '—', 'bpm', '静息最低的一天', rhrLo ? rhrLo[0] : ''],
+    [hrvHi ? dec(hrvHi[1], 1) : '—', 'ms', 'HRV 最高的一天', hrvHi ? hrvHi[0] : ''],
+    [hrvLo ? dec(hrvLo[1], 1) : '—', 'ms', 'HRV 最低的一天', hrvLo ? hrvLo[0] : ''],
+    [spo2Row ? String(spo2Row[1]) : '—', '%', '血氧最低的一次', spo2Row ? spo2Row[0] : ''],
   ];
-  h += card('这段里的几个极值', '',
-    table([['项目'], ['值 与 哪天', 'num']], ex.map(x => [
-      esc(x[0]),
-      '<b>' + esc(String(x[1])) + '</b><br><span class="dim">' + esc(String(x[2])) + '</span>',
-    ]), { tight: true }),
-    '都是这段时间里真实出现过的一天，不是平均值。');
+  h += card('这段里的几个极值', '都是真出现过的一次，不是平均值', factsHTML(ex), '');
 
   host.innerHTML = h;
   mount('#c-hrclock', C.clockRing(hr.hourAvg, {
@@ -1159,6 +1210,30 @@ function viewSleep(r, host) {
     '<div id="c-len" class="chart"></div>', '');
   h += card('睡眠结构', '平均每晚',
     '<div class="two-col"><div id="c-donut" class="chart"></div><div id="c-donut-legend"></div></div>', '');
+
+  // 极值：具体哪一夜，和上面的平均不是一回事
+  const realN = ns.filter(x => x.asleep >= 3);
+  const nTop = (arr, fn) => (arr.length ? arr.reduce((a, b) => (fn(b) > fn(a) ? b : a)) : null);
+  const nLow = (arr, fn) => (arr.length ? arr.reduce((a, b) => (fn(b) < fn(a) ? b : a)) : null);
+  const bedShiftOf = x => (clockNum(x.bed) + 12) % 24;
+  const nLong = nTop(ns, x => x.asleep);
+  const nShort = nLow(realN, x => x.asleep);
+  const nDeep = nTop(ns, x => x.deep);
+  const nRem = nTop(ns, x => x.rem);
+  const nLateBed = nTop(realN, bedShiftOf);
+  const nEarlyBed = nLow(realN, bedShiftOf);
+  const nAwake = nTop(ns, x => x.awake);
+  const nEarlyWake = nLow(realN, x => clockNum(x.wake));
+  h += card('这段里的几个极值', '都是真出现过的一夜，不是平均值', factsHTML([
+    [nLong ? dec(nLong.asleep) : '—', '小时', '睡得最长的一夜', nLong ? nLong.d + ' ' + nLong.bed + '–' + nLong.wake : ''],
+    [nShort ? dec(nShort.asleep) : '—', '小时', '睡得最短的一夜', nShort ? nShort.d : ''],
+    [nDeep ? dec(nDeep.deep, 2) : '—', '小时', '深睡最多的一夜', nDeep ? nDeep.d : ''],
+    [nRem ? dec(nRem.rem, 2) : '—', '小时', 'REM 最多的一夜', nRem ? nRem.d : ''],
+    [nLateBed ? nLateBed.bed : '—', '', '最晚睡下的一夜', nLateBed ? nLateBed.d : ''],
+    [nEarlyBed ? nEarlyBed.bed : '—', '', '最早睡下的一夜', nEarlyBed ? nEarlyBed.d : ''],
+    [nAwake ? dec(nAwake.awake, 2) : '—', '小时', '夜里醒得最久的一夜', nAwake ? nAwake.d : ''],
+    [nEarlyWake ? nEarlyWake.wake : '—', '', '最早起床的一夜', nEarlyWake ? nEarlyWake.d : ''],
+  ]), '');
 
   host.innerHTML = h;
   mount('#c-bands', C.sleepBands(ns, { w: CW, h: CH(280), padL: NARROW ? 36 : 44 }));
@@ -1280,6 +1355,26 @@ function viewActivity(r, host) {
       '<p class="note">这段范围里没有记录到运动。把范围放宽到「近一年」或「全部」再看。</p>', '');
   }
 
+  // 极值：具体哪一天，和上面的日均不是一回事
+  const pStep = dayPeak(r.byDay, 'steps', 'max');
+  const pStepLo = dayPeak(r.byDay, 'steps', 'min', 100);
+  const pFlight = dayPeak(r.byDay, 'flights', 'max');
+  const pLight = dayPeak(r.byDay, 'light', 'max');
+  const pExer = dayPeak(r.byDay, 'exer', 'max');
+  const pStand = dayPeak(r.byDay, 'stand', 'max');
+  const wLong = wkn.length ? wkn.reduce((a, b) => (b.dur > a.dur ? b : a)) : null;
+  const wFar = wkn.length ? wkn.reduce((a, b) => (b.dist > a.dist ? b : a)) : null;
+  h += card('这段里的几个极值', '都是真出现过的一天，不是平均值', factsHTML([
+    [pStep ? num(pStep.v) : '—', '步', '走得最多的一天', pStep ? pStep.d : ''],
+    [pStepLo ? num(pStepLo.v) : '—', '步', '走得最少的一天', pStepLo ? pStepLo.d + ' · 有记录的' : ''],
+    [pFlight ? num(pFlight.v) : '—', '层', '爬楼最多的一天', pFlight ? pFlight.d : ''],
+    [pLight ? num(pLight.v) : '—', '分钟', '日光晒得最多的一天', pLight ? pLight.d : ''],
+    [pExer ? num(pExer.v) : '—', '分钟', '锻炼最久的一天', pExer ? pExer.d : ''],
+    [pStand ? num(pStand.v) : '—', '分钟', '站得最久的一天', pStand ? pStand.d : ''],
+    [wLong ? Math.round(wLong.dur) : '—', '分钟', '最长的一次运动', wLong ? String(wLong.s).slice(0, 10) + ' · ' + labelOf('Workout:' + wLong.t) : ''],
+    [wFar ? dec(wFar.dist, 2) : '—', 'km', '最远的一次运动', wFar ? String(wFar.s).slice(0, 10) + ' · ' + labelOf('Workout:' + wFar.t) : ''],
+  ]), '');
+
   host.innerHTML = h;
   mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4 }));
   mount('#c-rings', C.hbarsHTML([
@@ -1369,6 +1464,33 @@ function viewEnergy(r, host) {
     '<div id="c-standh" class="chart"></div>',
     '手表每小时判一次「站着」还是「坐着」，缺的那部分是没戴表的时段。');
 
+  // 极值：负荷是「每分钟每公斤体重的千卡」，峰值封顶 20
+  const ePeak = dayPeak(r.byDay, 'effMax', 'max');
+  let eAvgHi = null;
+  for (const d in r.byDay) {
+    const o = r.byDay[d];
+    if (!o.effN) continue;
+    const v = o.effS / o.effN;
+    if (!eAvgHi || v > eAvgHi.v) eAvgHi = { d: d, v: v };
+  }
+  const eBurn = dayPeak(r.byDay, 'energy', 'max');
+  const eBasal = dayPeak(r.byDay, 'basal', 'max');
+  const eCyc = dayPeak(r.byDay, 'cyc', 'max');
+  const eStood = dayPeak(r.byDay, 'stood', 'max');
+  const eIdle = dayPeak(r.byDay, 'idle', 'max');
+  let efHour = 0;
+  for (let i = 1; i < ef.hourAvg.length; i++) if (ef.hourAvg[i] > ef.hourAvg[efHour]) efHour = i;
+  h += card('这段里的几个极值', '都是真出现过的一天，不是平均值', factsHTML([
+    [ePeak ? dec(ePeak.v, 1) : '—', '', '负荷峰值最高的一天', ePeak ? ePeak.d : ''],
+    [eAvgHi ? dec(eAvgHi.v, 2) : '—', '', '日均负荷最高的一天', eAvgHi ? eAvgHi.d : ''],
+    [eBurn ? num(eBurn.v) : '—', '千卡', '烧得最多的一天', eBurn ? eBurn.d : ''],
+    [eBasal ? num(eBasal.v) : '—', '千卡', '静息消耗最高的一天', eBasal ? eBasal.d : ''],
+    [eCyc ? dec(eCyc.v, 2) : '—', 'km', '骑行最远的一天', eCyc ? eCyc.d : ''],
+    [eStood ? num(eStood.v) : '—', '小时', '站得最久的一天', eStood ? eStood.d : ''],
+    [eIdle ? num(eIdle.v) : '—', '小时', '坐得最久的一天', eIdle ? eIdle.d : ''],
+    [efHour + ' 点前后', '', '一天里最累的钟点', '平均 ' + dec(ef.hourAvg[efHour], 1)],
+  ]), '极值是把当天所有记录直接累加，同一天有多个来源重复写入时会偏高 —— 看相对大小，别当绝对账。');
+
   host.innerHTML = h;
   mount('#c-efclock', C.clockRing(ef.hourAvg, {
     size: 400, min: 1.5, max: Math.max(5, Math.max.apply(null, ef.hourAvg)),
@@ -1449,6 +1571,27 @@ function viewMobility(r, host) {
   h += card('活动能力体检', '手表自己算的几项',
     '<div id="c-fit" class="chart"></div>',
     '行走稳定度来自 iPhone 走路时的姿态分析，六分钟步行是专门测的，步行心率是走路时的平均心率。');
+
+  // 极值：步态序列已经是「先按日平均」，所以这里的日子不会因为当天记了几条而失真
+  const gp = (arr, dir) => (arr.length
+    ? arr.reduce((a, b) => (dir === 'max' ? (b[1] > a[1] ? b : a) : (b[1] < a[1] ? b : a)))
+    : null);
+  const spHi = gp(g.speed, 'max'), spLo = gp(g.speed, 'min');
+  const slMax = gp(g.stepLen, 'max'), slMin = gp(g.stepLen, 'min');
+  const dblMin = gp(g.dblSup, 'min');
+  const asymMax = gp(g.asym, 'max');
+  const ascMax = gp(g.asc, 'max');
+  const sixMax = gp(g.sixmw, 'max');
+  h += card('这段里的几个极值', '都是真出现过的一天，不是平均值', factsHTML([
+    [spHi ? dec(spHi[1], 2) : '—', 'km/h', '走得最快的一天', spHi ? spHi[0] : ''],
+    [spLo ? dec(spLo[1], 2) : '—', 'km/h', '走得最慢的一天', spLo ? spLo[0] : ''],
+    [slMax ? dec(slMax[1], 1) : '—', 'cm', '步长最大的一天', slMax ? slMax[0] : ''],
+    [slMin ? dec(slMin[1], 1) : '—', 'cm', '步长最小的一天', slMin ? slMin[0] : ''],
+    [dblMin ? dec(dblMin[1] * 100, 1) : '—', '%', '双支撑最低的一天', dblMin ? dblMin[0] + ' · 越低越利落' : ''],
+    [asymMax ? dec(asymMax[1] * 100, 1) : '—', '%', '左右差最大的一天', asymMax ? asymMax[0] : ''],
+    [ascMax ? dec(ascMax[1], 2) : '—', 'm/s', '上楼最快的一天', ascMax ? ascMax[0] : ''],
+    [sixMax ? Math.round(sixMax[1]) : '—', 'm', '六分钟走得最远的一次', sixMax ? sixMax[0] : ''],
+  ]), '');
 
   host.innerHTML = h;
   mount('#c-spd', C.line(g.speed, { color: 'var(--green)', w: CW, h: CH(220), pad: NARROW ? 30 : 34, minPad: 0.15 }));
