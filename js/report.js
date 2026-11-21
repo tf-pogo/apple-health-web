@@ -81,7 +81,59 @@ function byPart(hourN, hourAvg) {
 /** 把「口径 · 同比」拼成一句小字，空的自动丢掉 */
 const e1 = arr => arr.filter(Boolean).join(' · ');
 
-function stat(v, label, sub) { return '<div class="stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>'; }
+function stat(v, label, sub, refHTML) {
+  return '<div class="stat"><b>' + v + '</b><span>' + label + '</span>' +
+    (sub ? '<small>' + sub + '</small>' : '') + (refHTML || '') + '</div>';
+}
+
+/**
+ * 参考区间。lo–hi 是「一般成人」的常见范围，不是诊断标准，
+ * 也不是给某个人的处方 —— 只用来给数字一个横向参照。
+ * soft: true 表示学界没有统一阈值（比如 HRV），标签改成「常见区间」。
+ */
+const REFS = {
+  rhr:     { lo: 60, hi: 100, min: 40, max: 120, unit: 'bpm', part: '静息心率' },
+  hrv:     { lo: 20, hi: 100, min: 0, max: 160, unit: 'ms', soft: true },
+  spo2:    { lo: 95, hi: 100, min: 88, max: 100, unit: '%' },
+  sleep:   { lo: 7, hi: 9, min: 3, max: 12, unit: '小时', dec: 1 },
+  deep:    { lo: 13, hi: 23, min: 0, max: 40, unit: '%' },
+  rem:     { lo: 20, hi: 25, min: 0, max: 40, unit: '%' },
+  steps:   { lo: 7000, hi: 12000, min: 1500, max: 18000, unit: '步' },
+  volume:  { lo: 40, hi: 70, min: 30, max: 95, unit: 'dB' },
+  speed:   { lo: 3.6, hi: 6.5, min: 2, max: 8, unit: 'km/h', dec: 1 },
+  steplen: { lo: 60, hi: 80, min: 40, max: 95, unit: 'cm' },
+  dbl:     { lo: 20, hi: 35, min: 10, max: 50, unit: '%' },
+  asym:    { lo: 0, hi: 5, min: 0, max: 12, unit: '%' },
+  steady:  { lo: 95, hi: 100, min: 70, max: 100, unit: '%' },
+  sixmw:   { lo: 400, hi: 700, min: 200, max: 800, unit: 'm' },
+  awake:   { lo: 0, hi: 0.5, min: 0, max: 1.2, unit: '小时', dec: 2 },
+};
+
+/** 数卡下面的那条：一段参考区间 + 当前值落在哪儿 */
+function sref(key, v) {
+  const f = REFS[key];
+  if (!f || !isFinite(v) || v < 0) return '';
+  const span = (f.max - f.min) || 1;
+  const at = x => Math.max(0, Math.min(100, (x - f.min) / span * 100));
+  const d = f.dec == null ? 0 : f.dec;
+  // 边界留 5% 容差：REM 25.3% 对着「20–25」标成偏高太苛刻了
+  const tol = 0.05;
+  const st = v < f.lo * (1 - tol) ? 'low' : v > f.hi * (1 + tol) ? 'high' : 'ok';
+  const lab = f.soft
+    ? (st === 'ok' ? '常见区间' : st === 'low' ? '偏下' : '偏上')
+    : (st === 'ok' ? '正常' : st === 'low' ? '偏低' : '偏高');
+  const loP = at(f.lo), hiP = at(f.hi);
+  return '<div class="ref">' +
+    '<div class="refbar">' +
+      '<i class="rl" style="width:' + loP.toFixed(1) + '%"></i>' +
+      '<i class="ro" style="width:' + Math.max(0, hiP - loP).toFixed(1) + '%"></i>' +
+      '<i class="rh" style="width:' + Math.max(0, 100 - hiP).toFixed(1) + '%"></i>' +
+      '<b style="--p:' + at(v).toFixed(3) + '%"></b>' +
+    '</div>' +
+    '<div class="reft"><span>' + f.lo.toFixed(d) + '–' + f.hi.toFixed(d) + ' ' + f.unit + '</span>' +
+      '<em class="' + st + '">' + lab + '</em></div>' +
+  '</div>';
+}
 function card(title, sub, body, note) { return '<div class="card"><h3>' + title + (sub ? ' <span>' + sub + '</span>' : '') + '</h3>' + body + (note ? '<p class="note">' + note + '</p>' : '') + '</div>'; }
 function table(head, rows, opts) {
   const tight = opts && opts.tight ? ' tight' : '';
@@ -675,7 +727,7 @@ function viewAudio(r, host) {
   let h = '<div class="grid">' +
     stat(hm(hp.hours), '戴耳机总时长', days + ' 天有记录') +
     stat(days ? hm(hp.hours / days) : '—', '有记录时日均', '') +
-    stat(hp.avg + ' dB', '平均音量', '峰值 ' + hp.max + ' dB') +
+    stat(hp.avg + ' dB', '平均音量', '峰值 ' + hp.max + ' dB', sref('volume', hp.avg)) +
     stat(num(hp.over85), '次超过 85 dB', '其中 ' + num(hp.over90) + ' 次 >90 dB') +
     '</div>';
 
@@ -718,9 +770,9 @@ function viewHeart(r, host) {
     stat(num(hr.n), '次采样', e1([hr.p50 + ' bpm 中位', P && delta(hr.n, P.hr.n)])) +
     stat(hr.avg + ' bpm', '平均', e1(['范围 ' + hr.min + '–' + hr.max, P && delta(hr.avg, P.hr.avg)])) +
     stat(hr.p95 + ' bpm', '95 分位', '99 分位 ' + hr.p99) +
-    stat(r.rhr.avg + ' bpm', '静息心率', e1([r.rhr.n + ' 次测量', P && delta(r.rhr.avg, P.rhr.avg)])) +
-    stat(r.hrv.avg + ' ms', '心率变异性', e1([r.hrv.n + ' 次', P && delta(r.hrv.avg, P.hrv.avg)])) +
-    stat(r.spo2.avg + '%', '血氧', r.spo2.n + ' 次 · 最低 ' + r.spo2.min + '%') +
+    stat(r.rhr.avg + ' bpm', '静息心率', e1([r.rhr.n + ' 次测量', P && delta(r.rhr.avg, P.rhr.avg)]), sref('rhr', r.rhr.avg)) +
+    stat(r.hrv.avg + ' ms', '心率变异性', e1([r.hrv.n + ' 次', P && delta(r.hrv.avg, P.hrv.avg)]), sref('hrv', r.hrv.avg)) +
+    stat(r.spo2.avg + '%', '血氧', r.spo2.n + ' 次 · 最低 ' + r.spo2.min + '%', sref('spo2', r.spo2.avg)) +
     '</div>';
 
   // 星期几与一天六段：同一批采样换个切法，能看出是「作息」还是「某天特别忙」
@@ -818,11 +870,11 @@ function viewSleep(r, host) {
   void wakeStr;
 
   let h = '<div class="grid">' +
-    stat(dec(avgA), '平均睡眠小时', ns.length + ' 个夜晚') +
+    stat(dec(avgA), '平均睡眠小时', ns.length + ' 个夜晚', sref('sleep', avgA)) +
     stat(bedStr, '平均入睡', '平均 ' + wakeStr + ' 起') +
-    stat(dec(avgDeep, 2) + ' h', '深睡', dec(avgDeep / avgA * 100) + '%') +
-    stat(dec(avgRem, 2) + ' h', 'REM', dec(avgRem / avgA * 100) + '%') +
-    stat(dec(avgAwake, 2) + ' h', '夜间清醒', '') +
+    stat(dec(avgDeep, 2) + ' h', '深睡', dec(avgDeep / avgA * 100) + '%', sref('deep', avgDeep / avgA * 100)) +
+    stat(dec(avgRem, 2) + ' h', 'REM', dec(avgRem / avgA * 100) + '%', sref('rem', avgRem / avgA * 100)) +
+    stat(dec(avgAwake, 2) + ' h', '夜间清醒', '', sref('awake', avgAwake)) +
     '</div>';
 
   h += card('每一夜，从几点睡到几点', ns.length + ' 夜',
@@ -869,7 +921,7 @@ function viewActivity(r, host) {
 
   let h = '<div class="grid">' +
     stat(num(r.steps.total), '总步数', sd.length + ' 天') +
-    stat(num(avgs), '日均步数', '') +
+    stat(num(avgs), '日均步数', '', sref('steps', avgs)) +
     stat(best ? num(best[1]) : '—', '最高单日', best ? best[0] : '') +
     stat(num(r.dist.total) + ' km', '总距离', '步行与跑步') +
     stat(num(r.energy.total), '千卡', '活动能量') +
@@ -1057,12 +1109,12 @@ function viewMobility(r, host) {
   const sixLast = lastOf(g.sixmw);
 
   let h = '<div class="grid">' +
-    stat(dec(spdAvg, 2) + ' km/h', '步行速度', '最近一周 ' + dec(spdLast, 2) + ' · ' + g.speed.length + ' 天') +
-    stat(dec(slAvg, 1) + ' cm', '步长', '最近一周 ' + dec(slLast, 1) + ' cm') +
-    stat(dec(dblAvg, 1) + '%', '双支撑占比', '中位数 · 最近一周 ' + dec(dblLast, 1) + '%') +
-    stat(dec(asymAvg, 1) + '%', '左右不对称', '越高越不平衡 · 最近一周 ' + dec(asymLast, 1) + '%') +
-    stat(steadyLast ? Math.round(steadyLast) + '%' : '—', '行走稳定度', g.steady.length + ' 次体检') +
-    stat(sixLast ? Math.round(sixLast) + ' m' : '—', '六分钟步行', g.sixmw.length + ' 次') +
+    stat(dec(spdAvg, 2) + ' km/h', '步行速度', '最近一周 ' + dec(spdLast, 2) + ' · ' + g.speed.length + ' 天', sref('speed', spdAvg)) +
+    stat(dec(slAvg, 1) + ' cm', '步长', '最近一周 ' + dec(slLast, 1) + ' cm', sref('steplen', slAvg)) +
+    stat(dec(dblAvg, 1) + '%', '双支撑占比', '中位数 · 最近一周 ' + dec(dblLast, 1) + '%', sref('dbl', dblAvg)) +
+    stat(dec(asymAvg, 1) + '%', '左右不对称', '越高越不平衡 · 最近一周 ' + dec(asymLast, 1) + '%', sref('asym', asymAvg)) +
+    stat(steadyLast ? Math.round(steadyLast) + '%' : '—', '行走稳定度', g.steady.length + ' 次体检', sref('steady', steadyLast)) +
+    stat(sixLast ? Math.round(sixLast) + ' m' : '—', '六分钟步行', g.sixmw.length + ' 次', sref('sixmw', sixLast)) +
     '</div>';
 
   h += card('走路有多快', '按日平均 · ' + g.speed.length + ' 天',
