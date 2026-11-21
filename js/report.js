@@ -566,22 +566,34 @@ function viewOverview(r, host) {
   const longNight = ns.length ? nightBy(x => x.asleep) : null;
   const realNights = ns.filter(x => x.asleep >= 3);
   const lateNight = realNights.length ? realNights.reduce((a, b) => ((hhmm2(b.bed) + 12) % 24) > ((hhmm2(a.bed) + 12) % 24) ? b : a) : null;
-  const hiHr = peak('hrMax'), hiStep = peak('steps'), hiHp = peak('hpMax'), hiEff = peak('effMax');
+  const low = (key) => {
+    let best = null;
+    for (const d in r.byDay) {
+      const v = r.byDay[d][key];
+      if (v > 0 && (!best || v < best.v)) best = { d: d, v: v };
+    }
+    return best;
+  };
+  const hiHr = peak('hrMax'), loHr = low('hrMin'), hiStep = peak('steps');
+  const hiHp = peak('hpMax'), hiEff = peak('effMax'), loSpo2 = low('spo2Min');
   const ex = [
-    ['心跳最快', hiHr ? hiHr.v + ' bpm' : '—', hiHr ? hiHr.d : '—'],
-    ['走的最多的一天', hiStep ? num(hiStep.v) + ' 步' : '—', hiStep ? hiStep.d : '—'],
-    ['睡得最长的一夜', longNight ? dec(longNight.asleep) + ' 小时' : '—', longNight ? longNight.d : '—'],
-    ['最晚睡下的一夜', lateNight ? lateNight.bed : '—', lateNight ? lateNight.d : '—'],
-    ['听得最响的一次', hiHp ? hiHp.v + ' dB' : '—', hiHp ? hiHp.d : '—'],
-    ['身体负荷最高', hiEff ? dec(hiEff.v, 2) : '—', hiEff ? hiEff.d : '—'],
+    [hiHr ? String(hiHr.v) : '—', 'bpm', '心跳最快', hiHr ? hiHr.d : ''],
+    [loHr ? String(loHr.v) : '—', 'bpm', '心跳最慢', loHr ? loHr.d : ''],
+    [hiStep ? num(hiStep.v) : '—', '步', '走的最多的一天', hiStep ? hiStep.d : ''],
+    [longNight ? dec(longNight.asleep) : '—', '小时', '睡得最长的一夜', longNight ? longNight.d : ''],
+    [lateNight ? lateNight.bed : '—', '', '最晚睡下的一夜', lateNight ? lateNight.d : ''],
+    [hiHp ? String(hiHp.v) : '—', 'dB', '听得最响的一次', hiHp ? hiHp.d : ''],
+    [hiEff ? dec(hiEff.v, 2) : '—', '', '身体负荷最高', hiEff ? hiEff.d : ''],
+    [loSpo2 ? String(loSpo2.v) : '—', '%', '血氧最低', loSpo2 ? loSpo2.d : ''],
   ];
-  // 日期并进同一格，手机上不用横滑也能看全
-  h += card('这段时间的几个极值', '',
-    table([['项目'], ['值 与 哪天', 'num']], ex.map(x => [
-      esc(x[0]),
-      '<b>' + esc(x[1]) + '</b><br><span class="dim">' + esc(x[2]) + '</span>',
-    ]), { tight: true }),
-    '都是这段时间里真实出现过的一次，不是平均值。');
+  h += card('这段时间的几个极值', '都是真出现过的一次，不是平均值',
+    '<div class="facts">' + ex.map(x =>
+      '<div class="fact">' +
+        '<div class="fv">' + esc(x[0]) + (x[1] ? '<span class="fu">' + x[1] + '</span>' : '') + '</div>' +
+        '<div class="fk">' + esc(x[2]) + '</div>' +
+        '<div class="fs">' + esc(x[3] || '—') + '</div>' +
+      '</div>').join('') + '</div>',
+    '');
 
   // 一天长什么样：睡觉那段、心跳的起伏、什么时候烧能量，全摊在同一条 24 小时轴上
   const realN = ns.filter(n => n.asleep >= 3);

@@ -603,6 +603,13 @@ main {
   font-variant-numeric: tabular-nums;
 }
 .fact .fk { font-size: 12.5px; color: var(--text); margin-top: 3px; }
+.fact .fu {
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--dim);
+  margin-left: 3px;
+  letter-spacing: 0;
+}
 .fact .fs { font-size: 10.5px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
 @media (max-width: 720px) {
   .p-name { font-size: 22px; }
