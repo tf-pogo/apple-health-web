@@ -15,13 +15,14 @@
   --on-tertiary-container: #001f26;
   --error: #ba1a1a;
 
-  /* ---- 表面五级（M3 用色调表达层级，不用阴影） ---- */
-  --surface: #f7faf1;
+  /* ---- 表面五级（M3 用色调表达层级，不用阴影） ----
+     页面底刻意压深一级：纯白卡片要能「浮」在绿底上，白对 #f7faf1 几乎看不出边界 */
+  --surface: #e6ecda;
   --surface-lowest: #ffffff;
-  --surface-low: #f1f5e9;
-  --surface-mid: #ebefe2;
-  --surface-high: #e5e9db;
-  --surface-highest: #dfe4d5;
+  --surface-low: #eef2e5;
+  --surface-mid: #dde4cf;
+  --surface-high: #d6ddc7;
+  --surface-highest: #cfd7c0;
 
   --bg: var(--surface);
   --card: var(--surface-lowest);
