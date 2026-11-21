@@ -372,6 +372,27 @@ function peakOf(days) {
   return best;
 }
 
+/** 人格卡的渲染：概览和七个分区共用同一套结构，只是判定表和指针换成各自的维度 */
+function renderPersona(ps, kicker) {
+  return '<div class="card persona">' +
+    '<div class="p-kicker">' + kicker + '</div>' +
+    '<div class="p-name">' + esc(ps.top.name) + '</div>' +
+    '<p class="p-say">' + esc(ps.top.say) + '</p>' +
+    '<div class="dims">' + ps.dims.map(d =>
+      '<div class="dim">' +
+        '<div class="dhead"><span class="dname">' + d.name + '</span>' +
+          '<b class="dval">' + esc(d.val) + '</b></div>' +
+        '<div class="dtrack"><i style="--p:' + d.p.toFixed(3) + '"></i></div>' +
+        '<div class="dends"><span>' + d.lo + '</span><span>' + d.hi + '</span></div>' +
+      '</div>').join('') + '</div>' +
+    (ps.tags.length
+      ? '<div class="ptags">' + ps.tags.map(t =>
+        '<span title="' + esc(t.say) + '">' + esc(t.name) + '</span>').join('') + '</div>'
+      : '') +
+    '<p class="note">标签是从数据里读出来的，换范围会变。</p>' +
+    '</div>';
+}
+
 /** 这一段时间的「人格」：不是性格测试，就是把最突出的几个事实说成人话。
  *  按数组顺序取第一条命中的当标题，其余命中的做成小标签 —— 所以换个时间范围，标题会变。 */
 function persona(r, days) {
@@ -444,6 +465,274 @@ function persona(r, days) {
   ];
 
   return { top: top, tags: cands.slice(1, 6), dims: dims };
+}
+
+/* ---------------- 七个分区各一套人格 ---------------- */
+/* 同一套结构（主标签 + 指针 + chips），判定维度换成该分区自己的。
+   规则按数组顺序取第一条命中的当标题，所以换个时间范围标题会变。 */
+
+function dim(name, p, val, lo, hi) {
+  return { name: name, p: clamp01(p), val: val, lo: lo, hi: hi };
+}
+
+function pHeart(r, days) {
+  const hr = r.hr, rhr = r.rhr.avg, hrv = r.hrv.avg, spo2 = r.spo2.avg;
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('运动型心脏', '静息 ' + rhr + ' bpm、HRV ' + hrv + ' ms —— 跳得少而有力。', rhr > 0 && rhr < 58 && hrv >= 60);
+  add('安静的发动机', '静息心率平均 ' + rhr + ' bpm，低于 60 那一档。', rhr > 0 && rhr < 62);
+  add('一冲就上 ' + hr.max, '最高心率 ' + hr.max + ' bpm，这段里真出现过。', hr.max >= 190);
+  add('心率偏高', '平均 ' + hr.avg + ' bpm，静息 ' + rhr + ' bpm。', hr.avg >= 95);
+  add('恢复吃紧', 'HRV 平均 ' + hrv + ' ms，静息心率 ' + rhr + ' bpm。', hrv > 0 && hrv < 45);
+  add('血氧很稳', '最低也有 ' + r.spo2.min + '%，没掉下 94%。', r.spo2.min >= 94 && r.spo2.n > 20);
+  add('夜里掉得低', '最低心率 ' + hr.min + ' bpm。', hr.min <= 45);
+  add('节奏平稳', '静息 ' + r.rhr.avg + ' bpm、HRV ' + r.hrv.avg + ' ms，都在常见范围里。',
+    r.rhr.avg > 0 && r.hrv.avg > 0);
+
+  const top = cands[0] || { name: '普通节奏', say: '静息 ' + rhr + ' bpm、HRV ' + hrv + ' ms，都在常见范围里。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('静息', (rhr - 50) / 40, rhr ? rhr + ' bpm' : '—', '跳得省', '跳得勤'),
+      dim('峰值', (hr.max - 150) / 70, hr.max + ' bpm', '平缓', '冲得高'),
+      dim('恢复', (hrv - 25) / 65, hrv ? hrv + ' ms' : '—', '吃紧', '恢复好'),
+      dim('日均', (hr.avg - 65) / 45, hr.avg + ' bpm', '低', '高'),
+      dim('血氧', (spo2 - 93) / 7, spo2 ? spo2 + '%' : '—', '偏低', '充足'),
+      dim('波动', (hr.max - hr.min) / 200, hr.min + '–' + hr.max, '窄', '宽'),
+    ],
+  };
+}
+
+function pSleep(r, days) {
+  const ns = r.sleep.nights.filter(n => n.asleep >= 3);
+  const n = ns.length || 1;
+  const avgA = ns.reduce((a, x) => a + x.asleep, 0) / n;
+  const sum = ns.reduce((a, x) => a + x.asleep, 0) || 1;
+  const deepPct = ns.reduce((a, x) => a + x.deep, 0) / sum * 100;
+  const remPct = ns.reduce((a, x) => a + x.rem, 0) / sum * 100;
+  const awakeAvg = ns.reduce((a, x) => a + x.awake, 0) / n;
+  const bedH = clockMean(ns.map(x => clockNum(x.bed)));
+  const bedShift = (bedH + 12) % 24;
+  // 入睡时间的离散度：标准差超过 1.5 小时就是「作息在漂」
+  // 必须先把时刻搬到「中午 12 点当 0」的坐标系，否则 23:50 和 00:10 会被算成差 8 小时
+  const shifts = ns.map(x => (clockNum(x.bed) + 12) % 24);
+  const mean = shifts.reduce((a, b) => a + b, 0) / (shifts.length || 1);
+  const sd = Math.sqrt(shifts.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (shifts.length || 1));
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('睡够了的人', '平均 ' + dec(avgA) + ' 小时，' + n + ' 夜里多数在 7 小时以上。', avgA >= 7.5 && n >= 5);
+  add('欠着觉的人', '平均 ' + dec(avgA) + ' 小时，' + ns.filter(x => x.asleep < 6).length + ' 夜不到 6 小时。',
+    avgA > 0 && avgA < 6.8 && n >= 5);
+  add('夜里的猫', '平均 ' + clockStr(bedH) + ' 才睡下。', bedShift >= 13 && n >= 5);
+  add('早睡的人', '平均 ' + clockStr(bedH) + ' 就睡了。', bedShift <= 11.2 && n >= 5);
+  add('深睡富翁', '深睡占 ' + dec(deepPct) + '%。', deepPct >= 22 && n >= 5);
+  add('浅眠的人', '深睡只占 ' + dec(deepPct) + '%。', deepPct > 0 && deepPct < 15 && n >= 5);
+  add('REM 很足', 'REM 占 ' + dec(remPct) + '%。', remPct >= 25 && n >= 5);
+  add('作息很稳', '入睡时间上下不超过 ' + dec(sd, 1) + ' 小时。', sd <= 0.6 && n >= 7);
+  add('作息在漂', '入睡时间前后差 ' + dec(sd, 1) + ' 小时，没有固定点。', sd >= 1.5 && n >= 7);
+  add('一夜到天亮', '夜里醒着的总时长平均只有 ' + dec(awakeAvg, 2) + ' 小时。', awakeAvg < 0.15 && n >= 5);
+  add('夜里常醒', '夜里醒着的时间平均 ' + dec(awakeAvg, 2) + ' 小时。', awakeAvg >= 0.4 && n >= 5);
+
+  const top = cands[0] || { name: '按时睡的人', say: '平均 ' + dec(avgA) + ' 小时，深睡 REM 都在常见比例。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('时长', (avgA - 4) / 5, dec(avgA) + ' 小时', '睡得少', '睡得足'),
+      dim('深睡', (deepPct - 10) / 20, dec(deepPct) + '%', '少', '多'),
+      dim('REM', (remPct - 12) / 25, dec(remPct) + '%', '少', '多'),
+      dim('入睡', (bedShift - 10) / 6, clockStr(bedH), '早', '晚'),
+      dim('规律', 1 - (sd - 0.4) / 2.2, '± ' + dec(sd, 1) + ' 小时', '在漂', '很稳'),
+      dim('清醒', 1 - (awakeAvg - 0.05) / 0.6, dec(awakeAvg, 2) + ' 小时', '常醒', '一觉到亮'),
+    ],
+  };
+}
+
+function pActivity(r, days) {
+  const sd = r.steps.day;
+  const steps = r.steps.total / (sd.length || days || 1);
+  const km = r.dist.total / (days || 1);
+  const flights = r.flights.total / (days || 1);
+  const light = r.light.total / (days || 1);
+  const perWeek = r.workouts.length / ((days || 1) / 7);
+  // 周末运动占比：周六周日两天算下来动了几次
+  const we = r.workouts.filter(w => {
+    const g = new Date(String(w.s).slice(0, 10) + 'T00:00:00Z').getUTCDay();
+    return g === 0 || g === 6;
+  }).length;
+  const weShare = r.workouts.length ? we / r.workouts.length : 0;
+  const as = r.actsum || [];
+  const all3 = as.filter(x => x.moveGoal && x.move >= x.moveGoal && x.exGoal && x.ex >= x.exGoal &&
+    x.standGoal && x.stand >= x.standGoal).length;
+  const ringRate = as.length ? all3 / as.length : 0;
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('腿不离地的人', '日均 ' + num(steps) + ' 步。', steps >= 10000);
+  add('沙发常客', '日均 ' + num(steps) + ' 步。', steps > 0 && steps < 5000);
+  add('只在工作日动', '周末只占了 ' + Math.round(weShare * 100) + '% 的运动。', r.workouts.length >= 8 && weShare < 0.25);
+  add('周末战士', '周末占了 ' + Math.round(weShare * 100) + '% 的运动。', r.workouts.length >= 5 && weShare >= 0.55);
+  add('爬楼党', '日均 ' + dec(flights, 1) + ' 层楼。', flights >= 8);
+  add('见光少的人', '日均 ' + Math.round(light) + ' 分钟日光。', light < 20 && days >= 14);
+  add('日光充足', '日均 ' + Math.round(light) + ' 分钟日光。', light >= 60);
+  add('三环常亮', as.length + ' 天里有 ' + Math.round(ringRate * 100) + '% 天三环全合上。', ringRate >= 0.6 && as.length >= 14);
+
+  const top = cands[0] || { name: '日常量的人', say: '日均 ' + num(steps) + ' 步、' + dec(perWeek, 1) + ' 次运动/周。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('步数', (steps - 2000) / 12000, num(steps) + ' 步/日', '躺着', '暴走'),
+      dim('距离', (km - 1) / 13, dec(km, 1) + ' km/日', '少', '多'),
+      dim('爬楼', flights / 16, dec(flights, 1) + ' 层/日', '平路', '爬楼党'),
+      dim('运动', perWeek / 5, dec(perWeek, 1) + ' 次/周', '静养', '每周五练'),
+      dim('日光', light / 100, Math.round(light) + ' 分/日', '少见光', '晒得够'),
+      dim('三环', ringRate, Math.round(ringRate * 100) + '%', '常断', '常亮'),
+    ],
+  };
+}
+
+function pAudio(r, days) {
+  const hp = r.hp;
+  const perDay = hp.hours / Math.max(1, hp.day.length || 1);
+  const hh = hp.hourAvg || [];
+  const tot = hh.reduce((a, b) => a + b, 0) || 1;
+  const night = hh.slice(0, 6).reduce((a, b) => a + b, 0) / tot;
+  const eve = hh.slice(20, 24).reduce((a, b) => a + b, 0) / tot;
+  const over85rate = hp.n ? hp.over85 / hp.n : 0;
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('耳机常驻的人', '有记录的 ' + hp.day.length + ' 天里日均 ' + hm(perDay) + '。', perDay >= 2);
+  add('耳膜刺客', hp.over90 + ' 次超过 90 dB，峰值 ' + hp.max + ' dB。', hp.over90 >= 3);
+  add('夜里也在听', '凌晨 0–6 点占了 ' + Math.round(night * 100) + '% 的聆听时长。', night >= 0.2 && hp.hours > 5);
+  add('睡前听的人', '晚上 20–24 点占了 ' + Math.round(eve * 100) + '%。', eve >= 0.3 && hp.hours > 5);
+  add('听得很克制', '平均 ' + hp.avg + ' dB，超过 85 dB 的只有 ' + hp.over85 + ' 次。', hp.avg > 0 && hp.avg < 55);
+  add('音量偏高', '平均 ' + hp.avg + ' dB，' + Math.round(over85rate * 100) + '% 的采样超过 85 dB。',
+    hp.avg >= 65 || over85rate >= 0.02);
+  add('耳机收藏家', '全量里有 ' + hp.devices.length + ' 副耳机。', hp.devices.length >= 8);
+  add('听得不多', '有记录的 ' + hp.day.length + ' 天里日均 ' + hm(perDay) + '。', perDay > 0 && perDay < 0.5);
+
+  const top = cands[0] || { name: '普通听众', say: '日均 ' + hm(perDay) + '，平均 ' + hp.avg + ' dB。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('时长', perDay / 6, hm(perDay) + '/日', '偶尔听', '耳机常驻'),
+      dim('音量', (hp.avg - 40) / 45, hp.avg + ' dB', '安静', '很响'),
+      dim('超标', over85rate / 0.05, hp.over85 + ' 次超 85', '克制', '频繁'),
+      dim('夜间', night / 0.4, Math.round(night * 100) + '% 在凌晨', '白天听', '夜里听'),
+      dim('设备', hp.devices.length / 12, hp.devices.length + ' 副', '一副走天下', '收藏家'),
+    ],
+  };
+}
+
+function pEnergy(r, days) {
+  const e = r.effort;
+  const standRate = (r.standHour.stood + r.standHour.idle)
+    ? r.standHour.stood / (r.standHour.stood + r.standHour.idle) : 0;
+  const flights = r.flights.total / (days || 1);
+  const ratio = r.energy.total / Math.max(1, r.basal.total);
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('动起来的人', '平均负荷 ' + e.avg + ' kcal/hr·kg，活动能量 ' + num(r.energy.total) + ' 千卡。', e.avg >= 4.5);
+  add('坐得住的人', '站立只占了 ' + Math.round(standRate * 100) + '%。', standRate > 0 && standRate < 0.4);
+  add('一直站着的人', '站立占了 ' + Math.round(standRate * 100) + '%。', standRate >= 0.7);
+  add('爬楼党', '日均 ' + dec(flights, 1) + ' 层楼，累计 ' + num(r.flights.total) + ' 层。', flights >= 8);
+  add('骑车的人', '骑行 ' + dec(r.cycling.total, 1) + ' km。', r.cycling.total >= 20);
+  add('负荷偏低', '平均负荷 ' + e.avg + '，大部分时间身体没在费劲。', e.avg > 0 && e.avg < 3);
+  add('静息占比高', '静息能量是活动能量的 ' + Math.round(1 / Math.max(0.01, ratio)) + ' 倍。', ratio < 0.08);
+
+  const top = cands[0] || { name: '普通一天', say: '平均负荷 ' + e.avg + '，站立 ' + Math.round(standRate * 100) + '%。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('负荷', (e.avg - 1.5) / 4, e.avg + ' /kg·hr', '省力', '费劲'),
+      dim('活动量', ratio / 0.25, num(r.energy.total) + ' 千卡', '少', '多'),
+      dim('站立', standRate, Math.round(standRate * 100) + '%', '常坐', '常站'),
+      dim('爬楼', flights / 16, dec(flights, 1) + ' 层/日', '平路', '爬楼党'),
+      dim('骑行', r.cycling.total / 60, dec(r.cycling.total, 1) + ' km', '不骑', '常骑'),
+    ],
+  };
+}
+
+function pMobility(r, days) {
+  const g = r.gait;
+  const pick = (arr) => { if (!arr || !arr.length) return 0; const v = arr.map(x => x[1]).sort((a, b) => a - b); return v[v.length >> 1]; };
+  const mean = (arr) => (arr && arr.length ? arr.reduce((a, x) => a + x[1], 0) / arr.length : 0);
+  const speed = pick(g.speed), stepLen = pick(g.stepLen);
+  const dbl = pick(g.dblSup) * 100;
+  // 不对称一半的日子是 0，中位数会变成 0.0%，这里跟页面数卡一样用均值
+  const asym = mean(g.asym) * 100;
+  const steady = pick(g.steady) * 100;
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('步态年轻', '速度 ' + dec(speed, 2) + ' km/h、步长 ' + dec(stepLen, 0) + ' cm、双支撑 ' + dec(dbl, 0) + '%。',
+    speed >= 4.5 && dbl > 0 && dbl <= 30);
+  add('走路偏慢', '速度 ' + dec(speed, 2) + ' km/h，低于 3.6 这一档。', speed > 0 && speed < 3.6);
+  add('小步快走', '步长 ' + dec(stepLen, 0) + ' cm，但速度还有 ' + dec(speed, 2) + ' km/h。', stepLen > 0 && stepLen < 58 && speed >= 4);
+  add('大步走', '步长 ' + dec(stepLen, 0) + ' cm。', stepLen >= 72);
+  add('左右很均衡', '不对称 ' + dec(asym, 1) + '%。', asym <= 1 && g.asym.length > 20);
+  add('左右有差', '不对称 ' + dec(asym, 1) + '%，超过 5% 那一档。', asym >= 5);
+  add('站得很稳', '行走稳定度 ' + dec(steady, 0) + '%。', steady >= 98);
+  add('步态很稳', '不对称 ' + dec(asym, 1) + '%、稳定度 ' + dec(steady, 0) + '%，六年几乎没变过。',
+    asym > 0 && asym < 6 && steady >= 95);
+  add('值得留意', '不对称 ' + dec(asym, 1) + '%、稳定度 ' + dec(steady, 0) + '%，这两项一起偏低时值得找人看看。',
+    asym >= 6 && steady > 0 && steady < 95);
+
+  const top = cands[0] || { name: '步态正常', say: '速度 ' + dec(speed, 2) + ' km/h、步长 ' + dec(stepLen, 0) + ' cm，都在常见范围。' };
+
+  return {
+    top: top, tags: cands.slice(1, 6),
+    dims: [
+      dim('速度', (speed - 2.5) / 4, dec(speed, 2) + ' km/h', '慢', '快'),
+      dim('步长', (stepLen - 45) / 40, dec(stepLen, 0) + ' cm', '小步', '大步'),
+      dim('双支撑', 1 - (dbl - 18) / 25, dec(dbl, 1) + '%', '稳但慢', '轻快'),
+      dim('不对称', 1 - asym / 12, dec(asym, 1) + '%', '有差', '均衡'),
+      dim('稳定度', (steady - 80) / 20, dec(steady, 0) + '%', '偏低', '很好'),
+    ],
+  };
+}
+
+function pDevices(r, days) {
+  const gap = longestGap(r.byDay);
+  const span = (r.firstDate && r.lastDate)
+    ? Math.round((new Date(r.lastDate + 'T00:00:00Z') - new Date(r.firstDate + 'T00:00:00Z')) / 86400000) + 1
+    : days;
+  const cover = span ? Math.min(1, days / span) : 0;
+  const nd = (r.devices || []).length;
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('装备党', nd + ' 台设备、' + r.sources.length + ' 个写入来源。', nd >= 14);
+  add('断过的人', '中间断了 ' + num(gap.days) + ' 天。', gap.days >= 180);
+  add('记录很连续', span + ' 天里 ' + Math.round(cover * 100) + '% 的天有数据。', cover >= 0.8 && span >= 60);
+  add('只有老三样', '只有 ' + nd + ' 台设备在写数据。', nd > 0 && nd <= 3);
+  add('一个表戴很久', '从 ' + r.firstDate + ' 记到 ' + r.lastDate + '。', span >= 1000);
+
+  const top = cands[0] || { name: '够用的记录', say: nd + ' 台设备、' + r.sources.length + ' 个来源，覆盖 ' + Math.round(cover * 100) + '%。' };
+
+  return {
+    top: top, tags: cands.slice(1, 5),
+    dims: [
+      dim('设备', nd / 16, nd + ' 台', '少', '多'),
+      dim('来源', r.sources.length / 18, r.sources.length + ' 个', '少', '多'),
+      dim('覆盖', cover, Math.round(cover * 100) + '%', '常断', '连续'),
+      dim('跨度', span / 2200, span + ' 天', '短', '长'),
+    ],
+  };
 }
 
 /** 换个说法：把绝对量换算成有画面的东西。全按当前范围算，所以切范围会变。 */
@@ -534,24 +823,7 @@ function viewOverview(r, host) {
   const wkMin = r.workouts.reduce((a, w) => a + (w.dur || 0), 0);
 
   // 人格：这段数据最像谁。放在最上面 —— 进概览第一眼先知道「这段时间的我像谁」
-  const ps = persona(r, days);
-  let h = '<div class="card persona">' +
-    '<div class="p-kicker">这 ' + num(days) + ' 天里，你是</div>' +
-    '<div class="p-name">' + esc(ps.top.name) + '</div>' +
-    '<p class="p-say">' + esc(ps.top.say) + '</p>' +
-    '<div class="dims">' + ps.dims.map(d =>
-      '<div class="dim">' +
-        '<div class="dhead"><span class="dname">' + d.name + '</span>' +
-          '<b class="dval">' + esc(d.val) + '</b></div>' +
-        '<div class="dtrack"><i style="--p:' + d.p.toFixed(3) + '"></i></div>' +
-        '<div class="dends"><span>' + d.lo + '</span><span>' + d.hi + '</span></div>' +
-      '</div>').join('') + '</div>' +
-    (ps.tags.length
-      ? '<div class="ptags">' + ps.tags.map(t =>
-        '<span title="' + esc(t.say) + '">' + esc(t.name) + '</span>').join('') + '</div>'
-      : '') +
-    '<p class="note">标签是从数据里读出来的，换范围会变。</p>' +
-    '</div>';
+  let h = renderPersona(persona(r, days), '这 ' + num(days) + ' 天里，你是');
 
   // 这一段时间的六个大数：心跳、睡眠、日光、步数、距离、能量
   h += '<div class="grid six">' +
@@ -723,7 +995,8 @@ function viewOverview(r, host) {
 function viewAudio(r, host) {
   const hp = r.hp;
   const days = hp.day.length;
-  let h = '<div class="grid">' +
+  let h = renderPersona(pAudio(r, r.days || days), '这 ' + (r.days || days) + ' 天里，你的耳朵是') +
+    '<div class="grid">' +
     stat(hm(hp.hours), '戴耳机总时长', days + ' 天有记录') +
     stat(days ? hm(hp.hours / days) : '—', '有记录时日均', '') +
     stat(hp.avg + ' dB', '平均音量', '峰值 ' + hp.max + ' dB', sref('volume', hp.avg)) +
@@ -765,7 +1038,8 @@ function viewHeart(r, host) {
   const P = prevPick();
 
   // 数卡：每个大数下面除了口径，再给一句同比，才知道这段是变忙还是变闲
-  let h = '<div class="grid">' +
+  let h = renderPersona(pHeart(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的心脏') +
+    '<div class="grid">' +
     stat(num(hr.n), '次采样', e1([hr.p50 + ' bpm 中位', P && delta(hr.n, P.hr.n)])) +
     stat(hr.avg + ' bpm', '平均', e1(['范围 ' + hr.min + '–' + hr.max, P && delta(hr.avg, P.hr.avg)])) +
     stat(hr.p95 + ' bpm', '95 分位', '99 分位 ' + hr.p99) +
@@ -868,7 +1142,8 @@ function viewSleep(r, host) {
   const wakeStr = clockStr(clockMean(ns.map(x => clockNum(x.wake))));
   void wakeStr;
 
-  let h = '<div class="grid">' +
+  let h = renderPersona(pSleep(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的睡眠是') +
+    '<div class="grid">' +
     stat(dec(avgA), '平均睡眠小时', ns.length + ' 个夜晚', sref('sleep', avgA)) +
     stat(bedStr, '平均入睡', '平均 ' + wakeStr + ' 起') +
     stat(dec(avgDeep, 2) + ' h', '深睡', dec(avgDeep / avgA * 100) + '%', sref('deep', avgDeep / avgA * 100)) +
@@ -918,7 +1193,8 @@ function viewActivity(r, host) {
   r.workouts.forEach(w => { wtypes[w.t] = (wtypes[w.t] || 0) + 1; });
   const wk = Object.entries(wtypes).sort((a, b) => b[1] - a[1]);
 
-  let h = '<div class="grid">' +
+  let h = renderPersona(pActivity(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的活动是') +
+    '<div class="grid">' +
     stat(num(r.steps.total), '总步数', sd.length + ' 天') +
     stat(num(avgs), '日均步数', '', sref('steps', avgs)) +
     stat(best ? num(best[1]) : '—', '最高单日', best ? best[0] : '') +
@@ -1052,7 +1328,8 @@ function viewEnergy(r, host) {
   const rest = r.basal.total, act = r.energy.total;
   const standTot = r.standHour.stood + r.standHour.idle;
 
-  let h = '<div class="grid">' +
+  let h = renderPersona(pEnergy(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的能量是') +
+    '<div class="grid">' +
     stat(dec(ef.avg, 2), '平均身体负荷', 'kcal/hr·kg · 峰值 ' + dec(ef.max, 1)) +
     stat(best ? dec(best[1], 1) : '—', '最累的一天', best ? best[0] : '') +
     stat(num(rest), '千卡静息', '躺着不动烧掉的') +
@@ -1148,7 +1425,8 @@ function viewMobility(r, host) {
   const steadyLast = lastOf(g.steady) * 100;
   const sixLast = lastOf(g.sixmw);
 
-  let h = '<div class="grid">' +
+  let h = renderPersona(pMobility(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的步态是') +
+    '<div class="grid">' +
     stat(dec(spdAvg, 2) + ' km/h', '步行速度', '最近一周 ' + dec(spdLast, 2) + ' · ' + g.speed.length + ' 天', sref('speed', spdAvg)) +
     stat(dec(slAvg, 1) + ' cm', '步长', '最近一周 ' + dec(slLast, 1) + ' cm', sref('steplen', slAvg)) +
     stat(dec(dblAvg, 1) + '%', '双支撑占比', '中位数 · 最近一周 ' + dec(dblLast, 1) + '%', sref('dbl', dblAvg)) +
@@ -1192,7 +1470,8 @@ function viewMobility(r, host) {
 /* ---------------- 设备 ---------------- */
 
 function viewDevices(r, host) {
-  let h = '<div class="grid">' +
+  let h = renderPersona(pDevices(r, r.days || 1), '这 ' + num(r.days || 1) + ' 天里，你的记录是') +
+    '<div class="grid">' +
     stat(r.devices.length, '台设备', '') +
     stat(r.sources.length, '个数据源', '') +
     stat(r.meta.entries, '个文件', '在压缩包里') +
