@@ -8,7 +8,7 @@
 
 ![落地页](docs/screenshot.png)
 
-在线版：<https://tf-pogo.github.io/apple-health-web/>
+在线版：<https://pogo.gay/apple-health-web/>　仓库：<https://github.com/tf-pogo/apple-health-web>
 
 ---
 

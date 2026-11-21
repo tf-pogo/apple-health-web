@@ -105,16 +105,6 @@ function start(file) {
   worker.postMessage({ file });
 }
 
-// 部署在 GitHub Pages 上时，把页头的 GitHub 指回本仓库，免得写死用户名
-(function fixGh() {
-  const a = document.getElementById('gh');
-  if (!a) return;
-  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
-  if (!m) return;
-  const repo = location.pathname.split('/').filter(Boolean)[0];
-  a.href = repo ? 'https://github.com/' + m[1] + '/' + repo : 'https://github.com/' + m[1];
-})();
-
 function showReport() {
   $('#progress').hidden = true;
   $('#report').hidden = false;
