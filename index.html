@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>健康档案 · Apple Health 可视化</title>
+<meta name="description" content="在浏览器本地解析 Apple「健康」App 导出的压缩包，生成耳机、心率、睡眠、活动与设备报告。文件不会上传。">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="./">
+    <span class="dot"></span>
+    <span>健康档案</span>
+  </a>
+  <nav>
+    <a href="https://github.com/" target="_blank" rel="noopener" id="gh">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+  <section id="landing" class="landing">
+    <h1>你的身体，<em>六年的日志</em></h1>
+    <p class="lede">
+      把 iPhone「健康」App 导出的 <code>导出.zip</code> 拖进来，
+      看看耳朵听了多久、心脏什么时候最累、哪几个月真的在走路。
+    </p>
+
+    <div id="drop" class="drop" tabindex="0" role="button" aria-label="选择或拖入压缩包">
+      <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+              fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <strong>拖入 导出.zip</strong>
+      <span>或点击选择文件</span>
+      <input id="file" type="file" accept=".zip,application/zip" hidden>
+    </div>
+
+    <ul class="privacy">
+      <li>解析全部在本机浏览器里完成，没有服务器，没有上传，断网也能用。</li>
+      <li>导出的原始文件动辄几百 MB、几百万条记录，这里只做一次流式扫描，不保存原文。</li>
+    </ul>
+
+    <details class="how">
+      <summary>怎么从手机导出？</summary>
+      <ol>
+        <li>打开 iPhone 的「健康」App → 右上角头像。</li>
+        <li>滑到最底下 →「导出所有健康数据」。</li>
+        <li>等它生成，通过 AirDrop / 微信文件传输 / iCloud 发到电脑。</li>
+        <li>把那个 <code>导出.zip</code> 拖到上面。</li>
+      </ol>
+    </details>
+  </section>
+
+  <section id="progress" class="progress" hidden>
+    <div class="spinner"></div>
+    <p id="pmsg">读取压缩包…</p>
+    <div class="bar"><i id="pbar"></i></div>
+    <p class="hint" id="phint"></p>
+  </section>
+
+  <section id="report" hidden>
+    <div class="report-head">
+      <div>
+        <h2 id="rtitle">报告</h2>
+        <p id="rsub" class="muted"></p>
+      </div>
+      <button id="again" class="ghost" type="button">换一个文件</button>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist"></nav>
+    <div id="view" class="view"></div>
+  </section>
+
+  <section id="error" class="error" hidden>
+    <h2>解析失败</h2>
+    <p id="emsg"></p>
+    <button id="retry" class="ghost" type="button">再试一次</button>
+  </section>
+
+</main>
+
+<footer>
+  <span>数据只在你的浏览器里。没有后端，没有统计，没有上传。</span>
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+node_modules/
+out/
+_test/
+*.zip
+导出.xml
+export.xml
+*.png
+!docs/*.png
+.DS_Store
+Thumbs.db
