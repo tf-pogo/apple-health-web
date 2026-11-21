@@ -583,26 +583,67 @@ function viewOverview(r, host) {
     ]), { tight: true }),
     '都是这段时间里真实出现过的一次，不是平均值。');
 
-  // 手记的那些：条数都不多，但全是自己记的，跟手表采的不是一回事
-  const SYM = {
-    RapidPoundingOrFlutteringHeartbeat: '心悸 / 心跳过快',
-    Fatigue: '疲劳', ShortnessOfBreath: '气短', Dizziness: '头晕',
-  };
-  const odd = []
-    .concat(r.life.water.map(x => [x[0], '喝水', Math.round(x[1]) + ' mL']))
-    .concat(r.life.caffeine.map(x => [x[0], '咖啡因', Math.round(x[1]) + ' mg']))
-    .concat(r.life.mindful.map(x => [x[0], '正念', x[1] ? x[1] + ' 分钟' : '—']))
-    .concat(r.life.sex.map(x => [x[0], '性行为', x[1] ? x[1] + ' 分钟' : '—']))
-    .concat((r.symptoms || []).map(x => [x[0] + ' ' + x[1], '症状', SYM[x[2]] || x[2]]))
-    .concat((r.sleepGoal || []).map(x => [x[0], '睡眠目标', x[1] + ' 小时']))
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  // 一天长什么样：睡觉那段、心跳的起伏、什么时候烧能量，全摊在同一条 24 小时轴上
+  const realN = ns.filter(n => n.asleep >= 3);
+  const bedH = realN.length ? clockMean(realN.map(n => clockNum(n.bed))) : null;
+  const wakeH = realN.length ? clockMean(realN.map(n => clockNum(n.wake))) : null;
+  h += card('你的一天，摊在 24 小时里', '按这一段的平均排出来的',
+    '<div id="c-dayline" class="chart"></div>' +
+    '<div class="legend">' +
+      '<span><i class="sw sw-violet"></i>睡觉那段</span>' +
+      '<span><i class="sw sw-green"></i>每小时心率</span>' +
+      '<span><i class="sw sw-amber"></i>每小时烧的能量</span>' +
+    '</div>',
+    (bedH != null
+      ? '平均 ' + clockStr(bedH) + ' 睡下、' + clockStr(wakeH) + ' 起床，紫色的就是这一段。'
+      : '这段没有够长的睡眠记录。') +
+    '心率曲线早上抬起来、夜里沉下去；琥珀柱是活动能量的高峰，跟心率不完全同步 —— 有些时段是坐着心跳快，有些是动着但心率没上来。');
 
-  h += card('零散但也在记的事', odd.length ? odd.length + ' 条手记 · 最近 ' + Math.min(16, odd.length) + ' 条' : '',
-    odd.length ? table([['时间'], ['记了什么'], ['值', 'num']], odd.slice(0, 16).map(x =>
-      [esc(x[0]), esc(x[1]), esc(x[2])]), { tight: true }) : '<p class="note">这段时间里没有手记。</p>',
-    '喝水、咖啡因、正念、睡眠目标和症状都是手动记的或第三方 App 写的，条数少，单独列出来免得被大数盖掉。');
+  // 作息在漂：按月看入睡和起床时刻挪了没有
+  // 时刻在环上。以中午 12 点为 0 点摆位，午夜就成了中间值，不会从 23:59 跳回 00:00
+  const monthClock = key => {
+    const m = new Map();
+    realN.forEach(n => {
+      if (!n[key]) return;
+      const k = n.d.slice(0, 7);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(clockNum(n[key]));
+    });
+    return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(e => [e[0].slice(2).replace('-', '/'), (clockMean(e[1]) + 12) % 24]);
+  };
+  const mBed = monthClock('bed'), mWake = monthClock('wake');
+  h += mBed.length >= 3
+    ? card('作息在漂', mBed.length + ' 个月 · 每月平均',
+      '<div id="c-drift" class="chart"></div>' +
+      '<div class="legend">' +
+        '<span><i class="sw sw-violet"></i>入睡</span>' +
+        '<span><i class="sw sw-blue"></i>起床</span>' +
+      '</div>',
+      '两条线一起往上抬，就是整体往后挪；只有入睡那条抬、起床不动，说明睡得更晚但起得没变 —— 中间这块面积就是被压掉的那部分。')
+    : card('作息在漂', '这段太短，看不出漂移',
+      '<p class="note">至少要跨 3 个月才好看趋势。把范围放宽到「近一年」或「全部」。</p>', '');
 
   host.innerHTML = h;
+
+  if (bedH != null) {
+    mount('#c-dayline', C.dayStrip({
+      hr: r.hr.hourAvg, energy: r.energy.hour, bed: bedH, wake: wakeH,
+    }, { w: CW, h: CH(250) }));
+  }
+  if (mBed.length >= 3) {
+    // 图上的值是「从中午 12 点往后数的小时」，刻度要换算回真实时刻
+    // 轴上的值是「从中午 12 点往后数的小时」，刻度要换回真实时刻
+    const tone = v => {
+      const t = ((v + 12) % 24 + 24) % 24;
+      const hh = Math.floor(t);
+      return String(hh).padStart(2, '0') + ':' + String(Math.round((t - hh) * 60) % 60).padStart(2, '0');
+    };
+    mount('#c-drift', C.dualLine([
+      { color: 'var(--violet)', points: mBed },
+      { color: 'var(--blue)', points: mWake },
+    ], { w: CW, h: CH(210), pad: NARROW ? 42 : 46, tickFmt: tone, band: true }));
+  }
 
   // 速览行直接切 tab，不用回顶部再点
   host.querySelectorAll('[data-go]').forEach(el => {

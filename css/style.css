@@ -688,6 +688,10 @@ main {
   margin-right: 6px;
   vertical-align: -1px;
 }
+.legend .sw-violet { background: var(--violet); }
+.legend .sw-green { background: var(--green); }
+.legend .sw-amber { background: var(--amber); }
+.legend .sw-blue { background: var(--blue); }
 
 .two-col {
   display: grid;

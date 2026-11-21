@@ -294,3 +294,107 @@ export function histogram(hist, opts) {
   }
   return s;
 }
+
+/** 一天 24 小时横着摊开：睡眠带 + 心率折线 + 能量柱，共用一条时间轴 */
+export function dayStrip(hourly, opts) {
+  const o = Object.assign({ w: 900, h: 240, padL: 34, padR: 16 }, opts || {});
+  const s = svg(o.w, o.h);
+  const hr = (hourly.hr || []).map(v => (isFinite(v) ? v : 0));
+  const en = hourly.energy || [];
+  const top = 26, bot = o.h - 26;
+  const innerW = o.w - o.padL - o.padR;
+  const X = hh => o.padL + (hh / 24) * innerW;
+  const hrv = hr.filter(v => v > 0);
+  if (!hrv.length) return s;
+  const lo = Math.min.apply(null, hrv) - 2;
+  const hi = Math.max.apply(null, hrv) + 2;
+  const Y = v => bot - ((v - lo) / (hi - lo || 1)) * (bot - top);
+
+  // 睡觉的那一段：跨午夜就画成两截，不然带宽会横穿整天
+  if (hourly.bed != null && hourly.wake != null) {
+    const band = (x0, x1) => el('rect', {
+      x: X(x0), y: top, width: Math.max(0, X(x1) - X(x0)), height: bot - top,
+      fill: 'var(--violet)', opacity: 0.1,
+    }, s);
+    if (hourly.bed < hourly.wake) band(hourly.bed, hourly.wake);
+    else { band(hourly.bed, 24); band(0, hourly.wake); }
+  }
+
+  // 活动能量：贴着底部的矮柱，只当背景强度用
+  const enMax = Math.max.apply(null, en.concat([1]));
+  en.forEach((v, i) => {
+    if (!(v > 0)) return;
+    const bh = (v / enMax) * (bot - top) * 0.32;
+    el('rect', {
+      x: X(i) + 1.5, y: bot - bh, width: Math.max(1, innerW / 24 - 3), height: bh,
+      fill: 'var(--amber)', opacity: 0.26, rx: 2,
+    }, s);
+  });
+
+  for (let h = 0; h <= 24; h += 6) {
+    el('line', { x1: X(h), y1: top, x2: X(h), y2: bot, stroke: 'var(--axis)' }, s);
+    el('text', { x: X(h), y: o.h - 8, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle', fill: 'var(--axis-text)', 'font-size': 11 }, s, h + '时');
+  }
+  // 心率刻度：光看形状不知道在什么水平上
+  for (let g = 0; g < 4; g++) {
+    const v = lo + (hi - lo) * g / 3;
+    el('line', { x1: o.padL, y1: Y(v), x2: o.w - o.padR, y2: Y(v), stroke: 'var(--axis)', opacity: 0.55 }, s);
+    el('text', { x: o.padL - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, String(Math.round(v)));
+  }
+
+  let d = '';
+  hr.forEach((v, i) => { if (v > 0) d += (d ? ' L' : 'M') + (X(i) + innerW / 48) + ' ' + Y(v); });
+  el('path', { d, fill: 'none', stroke: 'var(--green)', 'stroke-width': 2.4, 'stroke-linejoin': 'round' }, s);
+
+  // 只标最高和最低各一个点，多了会糊
+  const iMin = hr.indexOf(Math.min.apply(null, hrv));
+  const iMax = hr.indexOf(Math.max.apply(null, hrv));
+  [[iMin, -1], [iMax, 1]].forEach(pair => {
+    const i = pair[0], dir = pair[1];
+    const v = hr[i];
+    if (!(v > 0)) return;
+    const x = X(i) + innerW / 48, y = Y(v);
+    el('circle', { cx: x, cy: y, r: 3.4, fill: 'var(--green)' }, s);
+    const bx = Math.min(o.w - o.padR - 46, Math.max(o.padL + 2, x - 34));
+    el('text', { x: bx, y: dir > 0 ? y - 9 : y + 16, fill: 'var(--row-text)', 'font-size': 11, 'font-weight': 600 }, s, i + '时 ' + Math.round(v));
+  });
+  return s;
+}
+
+/** 两条线叠一张图（月度作息：入睡 / 起床共用同一条时间轴） */
+export function dualLine(series, opts) {
+  const o = Object.assign({ w: 900, h: 210, pad: 40, minPad: 0.4, tickFmt: null }, opts || {});
+  const s = svg(o.w, o.h);
+  const all = series.reduce((a, sr) => a.concat(sr.points.map(p => p[1])), []);
+  if (!all.length) return s;
+  const lo = Math.min.apply(null, all) - o.minPad;
+  const hi = Math.max.apply(null, all) + o.minPad;
+  const n = series[0].points.length;
+  const X = i => o.pad + (i / Math.max(1, n - 1)) * (o.w - o.pad * 2);
+  const Y = v => o.h - o.pad - ((v - lo) / (hi - lo || 1)) * (o.h - o.pad * 2);
+  const span = hi - lo;
+  const dig = span >= 20 ? 0 : span >= 1.5 ? 1 : 2;
+  for (let g = 0; g < 4; g++) {
+    const v = lo + span * (0.07 + 0.86 * g / 3);
+    el('line', { x1: o.pad, y1: Y(v), x2: o.w - o.pad, y2: Y(v), stroke: 'var(--axis)', opacity: 0.7 }, s);
+    el('text', { x: o.pad - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s,
+      o.tickFmt ? o.tickFmt(v) : v.toFixed(dig));
+  }
+  // 两条线之间的那块就是「睡着的时长」，面积变窄就是觉被压掉了
+  if (o.band && series.length === 2) {
+    let d = '';
+    series[0].points.forEach((p, i) => { d += (i ? ' L' : 'M') + X(i) + ' ' + Y(p[1]); });
+    for (let i = n - 1; i >= 0; i--) d += ' L' + X(i) + ' ' + Y(series[1].points[i][1]);
+    el('path', { d: d + ' Z', fill: series[0].color, opacity: 0.1 }, s);
+  }
+  series.forEach(sr => {
+    let d = '';
+    sr.points.forEach((p, i) => { d += (i ? ' L' : 'M') + X(i) + ' ' + Y(p[1]); });
+    el('path', { d, fill: 'none', stroke: sr.color, 'stroke-width': 2.2, 'stroke-linejoin': 'round' }, s);
+    sr.points.forEach((p, i) => el('circle', { cx: X(i), cy: Y(p[1]), r: 3, fill: sr.color }, s));
+  });
+  el('text', { x: o.pad, y: o.h - 10, fill: 'var(--axis-text)', 'font-size': 10 }, s, series[0].points[0][0]);
+  el('text', { x: o.w - o.pad, y: o.h - 10, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, series[0].points[n - 1][0]);
+  return s;
+}
+
