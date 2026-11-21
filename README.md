@@ -11,6 +11,8 @@
 在线版：<https://pogo.gay/apple-health-web/>　仓库：<https://github.com/tf-pogo/apple-health-web>
 
 > 做到哪儿、下一步做什么，都记在文末的 [路线图 · 进度](#路线图--进度)。
+>
+> **这份文档也是交接文档**：数据流、字段字典、渲染与图表 API、样式 token、验收命令、红线都在下面（从「给下一个 agent 的入场说明」开始）。接手的人不必重读源码。
 
 ---
 
@@ -61,7 +63,7 @@ node tools/parse-local.mjs ~/Downloads/导出.zip out/report.json
 
 ```
 index.html            静态页面骨架
-css/style.css         深色主题
+css/style.css         样式：浅色 / 深色两套 CSS 变量 + 窄屏重排
 js/app.js             文件接入 + Worker 生命周期
 js/worker.js          Worker 入口：解压、逐行扫描、汇报进度
 js/zip.js             零依赖 ZIP 读取（EOCD 定位 + DecompressionStream）
@@ -75,7 +77,364 @@ preview.html          开发用预览页（读 out/report.json）
 tools/serve.mjs       本地静态服务器
 tools/dev.mjs         静态服务 + SSE 热重载
 tools/parse-local.mjs 命令行版解析器
+docs/screenshot.png   落地页截图（合成数据）
+LICENSE               MIT
 ```
+
+每个文件负责什么、想改某个东西该去哪个文件，见下面的 [代码地图](#代码地图)。
+
+## 给下一个 agent 的入场说明
+
+这份 README 同时是这个项目的交接文档。**别的 agent（或三个月后的我）接手时，不必重读源码**：下面几节把数据流、字段名、渲染 API、样式 token、验收命令和红线都写全了，改代码前先读完这一节往下到「红线」为止。
+
+三条最先要记住的约定：
+
+1. **数字只用一份口径**。所有统计都从 `result.byDay` 逐日求和（`js/range.js` 的 `pick()`），不另建第二套聚合。改时间范围只是换 `byDay` 的子集，从不重扫 XML。
+2. **换主题不重绘图表**。SVG 里的颜色一律 `var(--…)`，且必须落到 `style` 而不是属性上（见「图表 API」）。加新颜色请先在 `css/style.css` 的两套变量里都定义。
+3. **手机是第一现场**。iPhone 上的 Safari 是主要使用场景，窄屏（≤720px）是单独排过的；改完桌面一定要用 CDP 的 390×844 再看一眼（见「改完之后怎么验」）。
+
+## 数据流
+
+```
+File(导出.zip)
+  └─ js/app.js         选文件 → new Worker(new URL('./worker.js', import.meta.url), {type:'module'})
+       └─ js/worker.js  openZip → 找 导出.xml → for await (line of lines(stream)) → feedLine
+            ├─ js/zip.js     EOCD 倒扫找中央目录 → 条目表 → 流式 DecompressionStream('deflate-raw')
+            ├─ js/parse.js   async function* lines(stream)：按 \n 切行、跨块拼接、去 BOM
+            └─ js/analyze.js createAggregator / feedLine / finalize
+                 └─ finalize 返回 result（含 byDay 逐日索引）→ postMessage({type:'done'})
+                      └─ js/report.js  renderReport(result, ui)
+                           ├─ js/range.js   pick(result, from, to) → 与 finalize 同构的切片对象 R
+                           ├─ js/charts.js  14 个手写 SVG / HTML 图表
+                           └─ 八个 viewXXX(R, host) 拼 HTML 字符串 → host.innerHTML
+```
+
+Worker 有三条消息：`meta`（条目数 / xml 名 / 解压后字节数）、`progress`（每 4096 行、间隔 >90ms 报一次 `{lines, ratio}`）、`done`（`result`）、以及失败时的 `error`。`preview.html` 不走 Worker，直接 `fetch('out/report.json')`。
+
+## 代码地图
+
+| 文件 | 行数 | 职责 | 你要改 X，就来这儿 |
+| --- | --- | --- | --- |
+| `index.html` | 97 | 落地页骨架：顶栏、拖放区、进度、报告容器、错误态 | 文案、导出教程、DOM 骨架 |
+| `preview.html` | 189 | 开发预览页：读 `out/report.json` + LIVE 状态条 + SSE 热重载 | 开发工具条、tab 记忆 |
+| `css/style.css` | 949 | 全部样式。`:root` 浅色 / `[data-theme=dark]` 深色，两套同名变量 | 颜色、圆角、窄屏重排 |
+| `js/app.js` | 116 | 文件接入、Worker 生命周期、进度条、错误态 | 文件选择、错误文案 |
+| `js/worker.js` | 59 | 解析线程入口 | 解析进度汇报节奏 |
+| `js/zip.js` | 115 | 零依赖 ZIP 读：EOCD 定位 + `DecompressionStream('deflate-raw')` | ZIP64、加密包 |
+| `js/parse.js` | 71 | 行切分、属性提取、设备名解析、日期与「夜」的归属 | 新属性、时区 |
+| `js/analyze.js` | 850 | 聚合器：46 种 Record 类型的收敛 + `finalize` 摊平 | 新增数据类型的统计 |
+| `js/range.js` | 256 | 时间切片：`PRESETS`、`spanOf`、`pick` | 范围规则、新的预设 |
+| `js/report.js` | 1644 | 渲染层：八个视图、人格卡、组件、格式化 | 页面内容与图表组合 |
+| `js/charts.js` | 400 | 14 个手写 SVG / HTML 图表函数 | 图形本身 |
+| `js/theme.js` | 134 | 深浅切换 + 从点击处展开的动画 | 动效、首屏主题 |
+| `tools/serve.mjs` | 39 | 纯静态服务器（8777） | — |
+| `tools/dev.mjs` | 71 | 静态 + `fs.watch` + SSE `/__reload` | 热重载范围 |
+| `tools/parse-local.mjs` | 42 | Node 版解析器，输出 `out/report.json` | 命令行核对数字 |
+
+## 解析层
+
+### `js/zip.js`
+
+`openZip(file: File|Blob) → ZipFile`。不支持 ZIP64（>4 GB 或 >65535 条目）；不支持加密。
+
+| 方法 | 说明 |
+| --- | --- |
+| `find(suffix)` | 按名字后缀模糊找条目（绕过导出包里的目录前缀） |
+| `findAll(re)` | 正则筛条目，用来找 `electrocardiograms/*.csv`、`workout-routes/*.gpx` |
+| `bytes(entry)` / `text(entry)` | 读完整个条目（小文件用） |
+| `stream(entry)` | 返回 `ReadableStream`，**大文件只能走这条** |
+| `dataStart(e)` | 读本地头算出数据真正起点 |
+
+### `js/parse.js`
+
+| 函数 | 说明 |
+| --- | --- |
+| `async function* lines(stream)` | 逐行产出。**导出包的每行前面都有空格**，所以判断标签一律先 `trimStart()` |
+| `attr(s, key)` | 用 `indexOf(key + '="')` 取属性，比为每行建正则快一个量级 |
+| `deviceName(raw)` | `<<HKDevice: 0x…, name:…>>` → 名字。**必须带缓存**（Map），每条 Record 都会调 |
+| `parseDate(s)` | 手写解析 `2026-11-21 00:40:49 +0800`，不用 `new Date(string)` |
+| `sleepNightKey(startStr)` | 中午 12 点前算前一天，所以「一夜」按醒来那天归档 |
+| `dayKey(dateStr)` | 取 `YYYY-MM-DD` |
+
+### `js/analyze.js`
+
+`createAggregator()` 建容器 → `feedLine(a, line)` 逐行喂 → `finalize(a)` 摊平成 `result`。
+
+`feedLine` 先看 `<Record `，再按 `type` 属性分派到 46 个常量分支；`<Workout ` 单独一条状态机（`a.cur`），子元素 `<WorkoutStatistics type=… sum=… />` 与 `<WorkoutEvent>` 都往当前 workout 上累。
+
+已支持的 46 种（常量名就是代码里的名字，定义见 `analyze.js:7-53`）：
+
+| 组 | 常量 |
+| --- | --- |
+| 心脏 | `HR` `RHR` `HRV` `SPO2` `RESP` `VO2` `AFIB` `HRREC` `HIGHHR` `LOWHR` `RSYM` `SYMFATIGUE` `SYMBREATH` `SYMDIZZY` |
+| 睡眠 | `SLEEP` `BREATHD` `WRISTM` `SLEEPGOAL` |
+| 活动 | `STEPS` `DIST` `ENERGY` `LIGHT` `STAND` `EXER` `EFFORT` `BASAL` `CYCLING` `FLIGHTS` `STANDHOUR` |
+| 步态 | `WSPEED` `WSTEPLEN` `WDBLSUP` `WASYM` `SASCEND` `SDESCEND` `WALKHR` `STEADY` `SIXMW` |
+| 听力 | `HP` `ENV` |
+| 手记与其他 | `WEIGHT` `HEIGHT` `WATER` `CAFFEINE` `MINDFUL` `SEXACT` |
+
+**新加一个类型**的完整动作：常量 → `createAggregator` 里加容器 → `feedLine` 里加 `case` → 同时写进 `drec()` 的每日格子 → `finalize` 里平铺 → `range.js` 的 `pick` 里按日求和 → `report.js` 里显示。漏掉 `drec` 那一份，切时间范围时这个数就消失了。
+
+### `js/range.js`
+
+| 导出 | 说明 |
+| --- | --- |
+| `PRESETS` | `[['7d','近一周'],['1m','近一月'],['1y','近一年'],['all','全部']]` |
+| `spanOf(r, key)` | 以 `r.lastDate` 为锚点往前推（回放，不跟着系统今天走） |
+| `pick(r, from, to)` | 遍历 `r.byDay` 求和，返回与 `finalize` 同构的对象 |
+| `describe(from, to, days)` | 生成标题用的「2026-10-23 → 2026-11-21」 |
+
+## 数据字典
+
+### `result` 顶层（`finalize` 与 `pick` 同构）
+
+| 字段 | 说明 |
+| --- | --- |
+| `firstDate` / `lastDate` | 全量最早 / 最晚一条记录的日期（`YYYY-MM-DD`） |
+| `days` | 范围内**有数据**的天数（不是日历跨度） |
+| `range` | `{from, to}`，只在 `pick` 结果里 |
+| `meta` | `{zipBytes, entries, xml, lines, ms}`，`pick` 原样带过去 |
+| `me` | 个人资料：`{birth, sex, blood, skin, meds}` |
+| `counts` | 类型 → 条数。**全量**，不随范围变 |
+| `sources` / `devices` | `[[名字, 条数], …]` 降序。**全量** |
+| `hr` | `{n, avg, min, max, p50, p95, p99, hourN[24], hourAvg[24], hourMin[24], hourMax[24], hist[38], histMin:30, histBin:5, day}` |
+| `rhr` | `{n, avg, last:[日期,值], day}` |
+| `hrv` | `{n, avg}`（`global` 平均，不分日） |
+| `spo2` | `{n, avg, min, max, low}`（`low` = 低于 95% 的次数） |
+| `resp` | `{n, avg}` |
+| `vo2` | `[[日期, 值], …]` 升序 |
+| `body` | `{weight:[[d,v]], height:[[d,v]]}` |
+| `hp` | `{n, avg, max, hourN[24], hourAvg[24], devices:[{name,n,avg,max,hours}], hours, day:[[d,小时]], over80, over85, over90}` |
+| `env` | `{n, avg, max}` 环境音量 |
+| `steps` | `{n, total, day:[[d,步]]}` |
+| `dist` | `{total}` 步行跑步公里 |
+| `energy` | `{total, day, hour[24]}` 活动能量 |
+| `sleep` | `{segs, nights}`，`nights` 见下 |
+| `workouts` | 见下 |
+| `actsum` | `[[d,{move,exercise,stand,moveGoal,exerciseGoal,standGoal}], …]` |
+| `light` / `stand` / `exer` | `{total}`，分钟 |
+| `effort` | `{n, avg, max, day, hourAvg[24]}`，单位 kcal/hr·kg，`max` 常被 Apple 封顶在 20 |
+| `basal` / `cycling` / `flights` | `{total}`：静息千卡 / 骑行公里 / 层楼 |
+| `standHour` | `{stood, idle}` 逐小时站立判定计数 |
+| `gait` | 9 条 `[[日期, 值], …]`：`speed, stepLen, dblSup, asym, asc, desc, walkHr, steady, sixmw`。**都是按日平均后**的序列 |
+| `breath` / `wrist` / `afib` / `hrrec` | 同上形式的稀疏序列 |
+| `events` | `{high:[[d,'HH:MM'],…], low:[…]}` |
+| `symptoms` | `[[d, 'HH:MM', 类型], …]` |
+| `life` | `{water, caffeine, mindful, sex}`，`[[d, 'HH:MM', 值], …]` |
+| `sleepGoal` | `[[d, 值], …]` |
+| `byDay` | 逐日索引，见下。**切范围只求和这一个** |
+
+### `byDay[YYYY-MM-DD]` 每格
+
+| 字段 | 说明 |
+| --- | --- |
+| `hrN` `hrS` `hrMin` `hrMax` | 心率条数、和、最小、最大（已取整） |
+| `hrH[48]` | 前 24 个是每小时条数，后 24 个是数值之和。求每小时平均值用 `hrH[i+24]/hrH[i]` |
+| `hrB[38]` | 5 bpm 一格的直方图桶 |
+| `hpN` `hpS` `hpMax` | 耳机音量条数、和、最大 dB |
+| `hpDur` | **分钟**（`hp.hours = 总 hpDur / 60`）。按小时用会显示成「单日听了 872 小时」 |
+| `hpO80` `hpO85` `hpO90` | 超阈值次数 |
+| `hpH[48]` | 同 `hrH` 的结构 |
+| `steps` `dist` `energy` | 步数、公里、活动千卡 |
+| `energyH[24]` | 每小时活动能量 |
+| `light` `stand` `exer` | 日光、站立、锻炼，分钟 |
+| `spo2N` `spo2S` `spo2Min` `spo2Low` | 血氧 |
+| `respN` `respS` | 呼吸频率 |
+| `rhr` | 当日静息心率平均（0 表示那天没有） |
+| `hrv` | 当日 HRV 平均。**没有 hrvSum/hrvN**，`finalize` 里已经折算掉了 |
+| `effS` `effN` `effMax` | 身体负荷的和 / 条数 / 峰值 |
+| `effH[48]` | 同 `hrH`，值是保留 1 位小数的和 |
+| `basal` `cyc` `flights` | 静息千卡、骑行公里、层楼 |
+| `wsN/wsS` `slN/slS` `dblN/dblS` `asymN/asymS` `ascN/ascS` `descN/descS` `whrN/whrS` | 步速、步长、双支撑、不对称、上楼、下楼、步行心率的「条数 + 和」。平均值 = `S / N` |
+| `stood` `idle` | 站立 / 坐着的小时判定 |
+
+### `nights[i]`（睡眠的「一夜」）
+
+`{d, asleep, total, core, deep, rem, awake, bed:'HH:MM', wake:'HH:MM', night}`。单位都是小时，保留 2 位。`bed` 取当晚第一个睡眠段，`wake` 取最后一个；`night` 表示这一夜有一段落在 18:00–08:00。已过滤：`asleep > 0.5`、跨度 ≤ 10 小时、必须有 `night`。
+
+### `workouts[i]`
+
+`{t, dur, unit, dist, kcal, steps, avgHr, s, e, src, dev}`。`t` 是 `Running` / `HighIntensityIntervalTraining` 这种短名（渲染时走 `labelOf('Workout:' + t)` 翻中文）。`dist`/`kcal`/`steps`/`avgHr` 来自 `<WorkoutStatistics>` 子元素 —— `<Workout>` 开始标签里没有这些。
+
+## 渲染层
+
+`js/report.js` 只有两个导出：`renderReport(result, ui)` 与 `renderTab(key, ui)`，其余全是模块内私有函数。`ui = {title, sub, tabs, view}` 对应页面上的四个容器。
+
+模块级可变状态（同一次页面生命周期内共享，别在函数里重新赋值）：
+
+| 变量 | 含义 |
+| --- | --- |
+| `SRC` | 全量 `result`，`prevPick()` 与预设按钮要用 |
+| `R` | 当前范围的切片（`pick` 的返回值），所有 view 只读它 |
+| `UI` | 四个容器 |
+| `CUR` | 当前 tab key |
+| `RANGE` | `{from, to, preset}` |
+| `TABS` | `[['overview','概览'],['audio','耳朵'],['heart','心脏'],['sleep','睡眠'],['activity','活动'],['energy','能量'],['mobility','移动'],['devices','设备']]` |
+| `NARROW` / `CW` / `CH(k)` | 窄屏判定、图表画布宽（360 或 900）、窄屏高度 ×1.35 |
+
+换范围只调 `applyRange(from, to)`：重算 `R` → 重写标题 → 只重画当前 tab。
+
+### 组件函数（拼 HTML 字符串）
+
+| 函数 | 输出 | 备注 |
+| --- | --- | --- |
+| `stat(v, label, sub, refHTML)` | 一张数卡 `.stat` | `refHTML` 一般是 `sref(...)` |
+| `sref(key, v)` | 参考区间条 `.ref` | 键见下表；容差 5%，避免 REM 25.3% 被判「偏高」 |
+| `card(title, sub, body, note)` | 一张卡 `.card` | `sub` 是标题后的小字，`note` 是卡尾说明 |
+| `factsHTML(items)` | 一组小卡 `.facts` | `items` 每项 `[值, 单位, 名字, 日期]`；极值、换个说法都用它 |
+| `table(head, rows, opts)` | 表格 | `opts.tight` 去掉 460px 最小宽，2–3 列的表必须用 |
+| `renderPersona(ps, kicker)` | 人格卡 | `ps` 来自 `persona()` 或 `p*()` |
+| `hbarsHTML` / `hbars` | 横条 | 见「图表 API」，页面里一律用 HTML 版 |
+| `labelOf(type)` | HK 类型的中文名 | `Workout:Running` 会走 `WORKOUT` 表 |
+| `num` `dec` `hm` `mins` `bytes` `esc` | 格式化 | **`hm(hours)` 收的是小时**，传分钟会翻 60 倍 |
+
+`REFS` 里现有 15 个键（lo–hi 是常见范围，min–max 是进度条显示范围，`soft` 表示学界没有统一阈值）：
+
+`rhr` `hrv`(soft) `spo2` `sleep` `deep` `rem` `steps` `volume` `speed` `steplen` `dbl` `asym` `steady` `sixmw` `awake`
+
+### 时间与分组助手
+
+| 函数 | 用途 |
+| --- | --- |
+| `clockNum('07:27')` | → `7.45` |
+| `clockMean(list)` | 单位圆平均向量，跨午夜才对（23 点与 1 点不能算术平均） |
+| `clockStr(v)` | `7.45` → `'07:27'`，处理分钟进位 |
+| `shiftDay(iso, n)` | UTC 日期加减 |
+| `prevPick()` | 取紧邻当前范围、等长的上一段；全量或越界时返回 `null` |
+| `delta(cur, prev)` | `'↑ 9% 较上一段'` 一行小字 |
+| `byWeekday(days)` | 把 `[[d,值]]` 折成周一…周日的平均 |
+| `byPart(hourN, hourAvg)` | 六段：凌晨 0–6 / 早晨 6–9 / 上午 9–12 / 下午 12–18 / 晚上 18–22 / 深夜 22–24 |
+| `byMonthSum` / `byMonthAvg` | 折成按月 |
+| `dayPeak(byDay, key, dir, minV)` | 某字段最大 / 最小的那天，`minV` 剔掉「那天没记」的 0 |
+| `longestGap(byDay)` | 最长断档天数 |
+
+### 八个视图的结构
+
+每个视图签名都是 `viewXXX(r, host)`，往 `host.innerHTML` 里拼字符串，顺序固定为：**人格卡 → 数卡 → 分布图 → 日历/趋势 → 极值八卡**。
+
+| 视图 | 函数（行号） | 结构 |
+| --- | --- | --- |
+| 概览 | `viewOverview` :838 | 人格卡 → 六张大数卡 → summary-line → 换个说法（`funFacts`）→ 各分区速览（六张 `.fact.quick`，点击切 tab）→ 极值八卡 → 零散手记 → 你的一天（`dayStrip`）→ 作息在漂（`dualLine` + band） |
+| 耳朵 | `viewAudio` :1011 | 人格卡 → 4 数卡（时长 / 日均 / 均音量 / 超标次数）→ 每副耳机时长（`hbarsHTML`）→ 24 小时音量环（`clockRing`）→ 每日聆听时长（`bars`）→ 极值八卡 |
+| 心脏 | `viewHeart` :1079 | 人格卡 → 6 数卡（带 `sref` 与同比）→ 24 小时心率环 → 星期几 + 时段两组横条 → 直方图 → 每日平均折线 → 心率日历（`calendarYears`，`sqrt:false`）→ 极值八卡 |
+| 睡眠 | `viewSleep` :1183 | 人格卡 → 5 数卡 → 全量睡眠带状图（`sleepBands`）→ 最近 90 夜时长（`bars`）→ 结构甜甜圈（`donut`）→ 极值八卡 |
+| 活动 | `viewActivity` :1263 | 人格卡 → 6 数卡 → 按年日历（`calendarYears`）→ 三环达成（`hbarsHTML` + 4 张 stat）→ 都做了什么运动 → 运动的节奏（平均每次 / 最长一次 / 多久动一次 / 最多的月份 + 星期几 + 时段）→ 极值八卡 |
+| 能量 | `viewEnergy` :1419 | 人格卡 → 6 数卡 → 24 小时负荷环 → 每日负荷折线 → 静息 vs 活动（构成条 + 24 小时活动能量柱）→ 每月爬楼 → 站立小时 → 极值八卡 |
+| 移动 | `viewMobility` :1523 | 人格卡 → 6 数卡（带 `sref`）→ 步速 / 步长按日折线 → 双支撑与上楼按月折线 → 活动能力体检 → 极值八卡 |
+| 设备 | `viewDevices` :1615 | 人格卡 → 设备与来源贡献 → 个人资料表 |
+
+### 人格卡
+
+`renderPersona(ps, kicker)` 渲染 `{top:{name,say}, tags:[…], dims:[…]}`：一组规则按数组顺序判定，**取第一条命中的当标题**，其余命中的进 chips（最多 5 个）。所以换时间范围标题会变 —— 这是有意的。
+
+| 函数 | 所在分区 | kicker 文案 |
+| --- | --- | --- |
+| `persona` :421 | 概览（跨分区综合） | 这 N 天里，你是 |
+| `pHeart` :501 | 心脏 | 这 N 天里，你的心脏 |
+| `pSleep` :531 | 睡眠 | 这 N 天里，你的睡眠是 |
+| `pActivity` :578 | 活动 | 这 N 天里，你的活动是 |
+| `pAudio` :623 | 耳朵 | 这 N 天里，你的耳朵是 |
+| `pEnergy` :659 | 能量 | 这 N 天里，你的能量是 |
+| `pMobility` :691 | 移动 | 这 N 天里，你的步态是 |
+| `pDevices` :731 | 设备 | 这 N 天里，你的记录是 |
+
+四条硬规矩：
+
+- 名字统一是名词短语（「欠着觉的人」「耳机常驻的人」），因为模板是「这 N 天里，你是 ___」。
+- 每条规则都要带阈值，短范围（<14 天）不做长判断。
+- 六根（或五、四根）指针是**描述**不是评分，`dim(name, p, val, lo, hi)` 里 `p` 会 `clamp01`。
+- 入睡时刻的标准差必须先换坐标系：`(clockNum(x.bed) + 12) % 24`，否则 23:50 与 00:10 会被算成差 8 小时。
+
+## 图表 API（`js/charts.js`，14 个导出）
+
+全部零依赖手写 SVG。内部 `el(tag, attrs, parent, text)` 有一条关键规则：**attrs 里含 `var(` 的字符串走 `style.setProperty`，其余走 `setAttribute`** —— 演示属性不认 CSS 变量，只有落到 style 才能跟着主题变。
+
+| 函数 | 入参 | 主要 opts | 备注 |
+| --- | --- | --- | --- |
+| `svg(w, h)` | 宽高 | — | **必须同时 setAttribute viewBox + width + height** |
+| `clockRing(vals, o)` | 24 个数 | `size:420, min, max, color(v,lo,hi), centerValue, centerLabel` | 跳过 0/NaN；每 3 小时一个刻度 |
+| `bars(vals, o)` | 数列 | `w:900, h:180, color, pad:28, labels:true, labelFmt(i)` | 竖直柱 |
+| `line(pts, o)` | `[[label,val]]` | `w, h:220, color:'var(--green)', pad:34, fill:true, minPad:2` | y 刻度位数按量级：跨度≥20 取整、≥1.5 一位、否则两位 |
+| `hbars(items, o)` | `{name,value,sub?}` | `maxItems:10, color, labelW:150` | SVG 版，手机不要用 |
+| `hbarsHTML(items, o)` | 同上 | 加 `base:0` | HTML 版，手机必用；`base` 让窄区间从下沿起画 |
+| `donut(parts, o)` | `{name,value,color}` | `size:220, hole:0.62` | |
+| `calendar(days, o)` | `[[d,val]]` | `cell:11, gap:2.6, color:'var(--tile)', min, max, fixedYear, sqrt` | `sqrt!==false` 用平方根压；区间窄时传 `sqrt:false` 走线性 |
+| `calendarYears(days, o)` | 同上 | 同 `calendar` | 一年一行 53 周，容器 `.cal-years` 横滑 |
+| `sleepBands(nights, o)` | `{d,asleep,bed,wake}` | `w, h:260, padL:44, padB:26` | 纵轴 `(hh+12)%24`，中午 12 点当 0；每夜独立 rect |
+| `histogram(hist, o)` | 桶数组 | `w, h:180, min:30, bin:5, color` | |
+| `dayStrip(hourly, o)` | `{hr[24], energy[24], bed, wake}` | `w, h:240, padL:34, padR:16` | 睡眠带跨午夜拆两截；只标最高最低各一点 |
+| `dualLine(series, o)` | `[{color, points}]` | `w, h:210, pad:40, minPad:0.4, tickFmt, band` | `band:true` 把两条线之间填色（睡着的时长） |
+
+## 样式与 DOM 契约
+
+### CSS 变量（两套同名值：`:root` 浅色 / `[data-theme="dark"]` 深色）
+
+| 组 | 变量 |
+| --- | --- |
+| M3 语义色 | `--primary` `--on-primary` `--primary-container` `--on-primary-container` `--secondary-container` `--on-secondary-container` `--tertiary` `--on-tertiary` `--tertiary-container` `--on-tertiary-container` `--error` |
+| 表面五级 | `--surface`（页面底）`--surface-lowest`（卡片）`--surface-low`（卡内小块）`--surface-mid` `--surface-high` `--surface-highest`。**浅色是越高越深，深色是越高越亮** |
+| 语义别名 | `--bg` `--card` `--card2` `--line` `--text` `--muted` `--dim` |
+| 图表分类色 | `--green` `--blue` `--amber` `--red` `--violet` `--cyan`（饱和度刻意留着，别换成 M3 tonal） |
+| 图表专用 | `--axis` `--axis-text` `--strong` `--row-bg` `--row-text` `--row-sub` `--value-text` `--empty` `--tile` |
+| 其他 | `--glow-1` `--glow-2` `--code-bg` `--btn-bg` `--btn-line` `--btn-hover` `--on-accent` `--shadow` |
+| 形状与动效 | `--r-xl:28px` `--r-lg:24px` `--r-md:16px` `--r-sm:12px` `--r-full`；`--ease-spring` `--ease-std` |
+
+样式文件的分节（行号）：顶栏 164 / 深浅切换 202 / 落地页 243 / 进度 316 / 报告 349 / 时间范围 412 / 卡片 492 / 人格卡 509 / 换个说法 596 / 横条 791 / 窄屏 825。
+
+### 关键类名
+
+| 类名 | 是什么 |
+| --- | --- |
+| `.card` `.stat` `.grid` `.grid.six` `.two-col` `.summary-line` | 卡片、数卡、栅格 |
+| `.fact` `.facts` `.quickgrid` `.qv` `.qk` `.qs` | 极值与速览的小卡 |
+| `.persona` `.p-name` `.p-say` `.dims` `.dim` `.dtrack` `.ptags` | 人格卡 |
+| `.hbars` `.hrow` `.hname` `.hsub` `.hbar` `.hval` | HTML 横条（窄屏会重排成三行） |
+| `.table-wrap` `.data` `.tight` | 表格容器（横滑）与紧凑表 |
+| `.ref` `.refbar` `.reft` | 参考区间条 |
+| `.range` `.range-presets` `.range-dates` `.range-hint` | 时间范围条 |
+| `.cal-years` `.cal-row` `.cal-y` | 按年日历（横滑容器） |
+| `.theme-wipe` | Safari 那条自绘的扩散覆盖层 |
+
+### DOM 契约
+
+`index.html` 必须保留这些 id：`#theme`（切换按钮）、`#drop` `#file`（选择与拖放）、`#progress` `#pbar` `#pmsg` `#phint`、`#report` `#rtitle` `#rsub` `#tabs` `#view`、`#error` `#emsg` `#retry`、`#again`。`js/app.js` 直接按这些 id 取节点。
+
+`preview.html` 必须保留：`#devbar` `#dot` `#dbstat` `#dbtime` `#dbcopy`、`#report` `#rtitle` `#rsub` `#tabs` `#view`。tab 的 key 名单**不在 JS 里硬编码**，而是从渲染出来的 `#tabs button[data-k]` 读（`KEYS()`），所以加新 tab 不用改预览页。
+
+## 改完之后怎么验
+
+```bash
+# 0) 起服务（改代码自动热重载）
+node tools/dev.mjs 8777            # http://127.0.0.1:8777/preview.html
+
+# 1) 数据层：重扫一遍真实包，看有没有算法崩
+node tools/parse-local.mjs /path/to/导出.zip out/report.json
+#    期望：扫描 2,229,168 行、680,992 条、约 2.0 秒、472 天（byDay 739 天含新增类型）
+
+# 2) 渲染层：桌面 + 手机、浅色 + 深色，逐页截图
+node _shot.mjs "a=http://127.0.0.1:8777/preview.html?noes=1&tab=overview"
+MOBILE=1 node _shot.mjs "b=http://127.0.0.1:8777/preview.html?noes=1&tab=heart&theme=dark"
+#    它会打印 scrollWidth/innerWidth（必须相等，否则有横向溢出）与运行时异常
+```
+
+`?noes=1` 一定要带：`preview.html` 的 EventSource 长连接会让 headless Chrome 永远等不到网络静默，截图会挂死。改完 JS 再加 `&v=随机数` 绕缓存。
+
+URL 参数速查：`?preset=7d|1m|1y|all`（**不是 1w**）、`?from=YYYY-MM-DD&to=YYYY-MM-DD`、`?tab=overview|audio|heart|sleep|activity|energy|mobility|devices`、`?theme=dark`。
+
+数字对不对，优先信这三条：`byDay` 求和 = 顶层值、`pick(全量)` 与 `finalize` 完全一致、近一周/近一月/近一年的手算结果。任何一条不一致，先查 `drec()` 有没有漏写这个字段。
+
+## 红线
+
+1. **不许上传**。任何 `fetch` / `XMLHttpRequest` / `<img src=http…>` 往外发数据都是不可接受的；`preview.html` 的 `fetch('out/report.json')` 是本机相对路径，可以，但不能改成远程。
+2. **仓库里不许出现真实数据**。`out/`（含 `report.json`）、截图、`导出.zip` 全部在 `.gitignore` 里；`docs/screenshot.png` 只能用合成数据的那张。
+3. **别为省事复制一份聚合逻辑**。所有区间统计走 `byDay` + `pick`，否则「换范围后某个数字没变」这类 bug 会反复出现。
+4. **别在 SVG 属性里写 `var(--)`**。要写进 `style`，否则切主题时那块颜色不动。
+5. **别拼 `rgba()` 上色**。用 `fill: var(--x)` + `fill-opacity`。
+6. **窄屏别用 SVG 横条**。整图缩放会把字号压到 4–5px，用 `hbarsHTML`。
+7. **日期框字号不得小于 16px**，否则 iOS 聚焦时会把整页放大。
+8. **`hm()` 只收小时**、`hpDur` 只收分钟、双支撑与不对称是 0–1 的比例。这三个单位错误各踩过一次。
+9. **别手写「较上一段」的比较**。用 `prevPick()` + `delta()`，它会处理越界与基数为 0。
+10. **改完必做三件事**：`git commit`、`git push`（走本机 7897 代理，已在 `.git/config`）、《同步这份 README》。
 
 ## 概览里的人格是怎么来的
 
@@ -370,6 +729,7 @@ node tools/dev.mjs            # http://127.0.0.1:8777/preview.html
 
 | | 事项 | 说明 |
 | --- | --- | --- |
+| ✅ | 交接文档 | 数据流 / 代码地图 / 字段字典 / 渲染与图表 API / 样式 token / 验收命令 / 红线，见上文 |
 | ⬜ | 英文界面 | 目前全中文 |
 | ⬜ | 纯函数单测 | `analyze.js` 的聚合逻辑可以在 node 里直接测 |
 | ⬜ | 解析进度按字节 | 现在按行数估算，进度条末端会跳一下 |
