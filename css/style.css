@@ -226,13 +226,13 @@ main {
 .theme-toggle.mini svg { width: 13px; height: 13px; }
 
 /* 圆形扩散：新旧两张快照叠着，新的那张从点击处张开 */
-/* 切换主题的降级层：铺旧底色再从原点收回（Safari 走这条） */
+/* 切换主题的降级层：把新主题的底色铺成一层，从点击处扩到整屏（Safari 走这条） */
 .theme-wipe {
   position: fixed;
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  will-change: clip-path, opacity;
+  will-change: clip-path;
 }
 
 ::view-transition-old(root),

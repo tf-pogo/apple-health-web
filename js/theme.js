@@ -39,32 +39,64 @@ function canSnapshot() {
   return typeof document.startViewTransition === 'function' && !safari;
 }
 
-/** 降级：铺一层旧底色盖住整页，再从原点收回去 —— 露出来的就是已经换好的新主题。
- *  先把 layer 盖上再换主题，过程中不会闪。 */
-function wipe(run, x, y) {
+/** 降级（Safari）：把**新主题**的底色铺成一层，从一个点扩到整屏，铺满之后才真的换主题。
+ *  关键是顺序 —— 先换主题再画，看到的就成了「旧色往里收」，方向正好相反。 */
+let wiping = null;
+
+function wipe(run, x, y, target) {
+  // 目标主题的底色要在同一帧里临时切过去读，读完立刻切回来，浏览器不会画出中间态
+  const cur = document.documentElement.dataset.theme || '';
+  document.documentElement.dataset.theme = target;
   const bg = getComputedStyle(document.body).backgroundColor;
   const glow = getComputedStyle(document.documentElement).getPropertyValue('--glow-1').trim();
-  const far = farRadius(x, y);
+  document.documentElement.dataset.theme = cur;
+
+  // 上一轮还没跑完就直接收掉，别叠两层
+  document.querySelectorAll('.theme-wipe').forEach(n => n.remove());
+  if (wiping) {
+    if (wiping.a) {
+      wiping.a.onfinish = null;
+      wiping.a.oncancel = null;
+      try { wiping.a.cancel(); } catch (e) {}
+    }
+    wiping = null;
+  }
 
   const layer = document.createElement('div');
   layer.className = 'theme-wipe';
   layer.style.background =
     (glow ? 'radial-gradient(1100px 380px at 50% -140px, ' + glow + ', transparent 70%), ' : '') + bg;
+  layer.style.clipPath = 'circle(0px at ' + x + 'px ' + y + 'px)';
   document.body.appendChild(layer);
 
-  run();
+  const far = farRadius(x, y);
+  let a = null;
+  try {
+    a = layer.animate(
+      [
+        { clipPath: 'circle(0px at ' + x + 'px ' + y + 'px)' },
+        { clipPath: 'circle(' + far + 'px at ' + x + 'px ' + y + 'px)' },
+      ],
+      { duration: DUR, easing: EASE, fill: 'both' }
+    );
+  } catch (e) {
+    // 万一这个引擎不放 clip-path 动画，就别把主题卡住：直接换掉
+    run();
+    layer.remove();
+    return;
+  }
+  wiping = { a: a, layer: layer, target: target };
 
-  const a = layer.animate(
-    [
-      { clipPath: 'circle(' + far + 'px at ' + x + 'px ' + y + 'px)', opacity: 1 },
-      { clipPath: 'circle(0px at ' + x + 'px ' + y + 'px)', opacity: .92 },
-    ],
-    { duration: DUR, easing: EASE, fill: 'both' }
-  );
-  const done = () => layer.remove();
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    run(); // 圆已经铺满整屏，这时候换主题看不出跳变
+    if (layer.parentNode) layer.remove();
+    if (wiping && wiping.layer === layer) wiping = null;
+  };
   a.onfinish = done;
-  a.oncancel = done;
-  setTimeout(done, DUR + 300); // 动画被打断也要收掉，别留一层盖着页面
+  setTimeout(() => { if (layer.parentNode) done(); }, DUR + 320); // 动画被吞掉也要收尾
 }
 
 /** 把按钮接上：图标随当前主题换，点击就地切换 */
@@ -80,12 +112,15 @@ export function initTheme(btn) {
   paint();
 
   btn.addEventListener('click', e => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    // 降级路径里主题是在动画结束时才换的，中途再点一次要知道「上一轮目标是哪个」，
+    // 否则连点两下会算成同一个目标，等于没切
+    const now = (wiping && wiping.target) || document.documentElement.dataset.theme;
+    const next = now === 'dark' ? 'light' : 'dark';
     const { x, y } = origin(btn, e);
     const run = () => { applyTheme(next); paint(); };
 
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return run();
-    if (!canSnapshot()) return wipe(run, x, y);
+    if (!canSnapshot()) return wipe(run, x, y, next);
 
     const far = farRadius(x, y);
     const vt = document.startViewTransition(run);

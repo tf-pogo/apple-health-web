@@ -228,7 +228,9 @@ tools/parse-local.mjs 命令行版解析器
 - 两套主题是同一批 CSS 变量的两组值（`:root` / `[data-theme="dark"]`），图表里的颜色全部走 `var(--…)`，所以切换时**不需要重绘**，SVG 会自己跟着变。
 - 切换动画从按钮那个点长出一个圆，圆里是新主题。两条实现：
   - Chrome / Edge：用 View Transitions 拍一张页面快照，再把 `clip-path` 的圆动画挂到 `::view-transition-new(root)` 上，所以圆里是**真的新页面**随之展开。
-  - Safari（含 iOS，主场景）：View Transitions 到 18 才有，把动画挂到伪元素上在 WebKit 也不稳。改成自己画：铺一层旧主题的底色盖住整页，再从原点把这一层 `clip-path` 收缩到 0，露出来的就是新主题。先盖后换，中间不闪。
+  - Safari（含 iOS，主场景）：View Transitions 到 18 才有，把动画挂到伪元素上在 WebKit 也不稳。改成自己画：把**新主题**的底色做成一层，`clip-path` 从点击点扩到整屏，**铺满之后才真的换主题**，再把这层撤掉。
+    - 顺序不能反。先换主题再画，屏幕上是旧色在往里收，看着像倒放；先画后换，才是新色从按键位置推开。
+    - 目标主题的底色要读，但不能先把页面切过去：在同一帧里临时改一下 `data-theme`、读完立刻改回来，浏览器不会画出这个中间态。
   - 系统开了「减少动态效果」直接换，不做动画。
   - 圆心取真实点击位置；键盘 Enter/Space 触发的 click 里 `clientX/Y` 都是 0，会退回按钮中心（否则圆从左上角长出来）。
 - 地址栏也能指定：`?theme=dark` / `?theme=light`。
@@ -248,7 +250,7 @@ tools/parse-local.mjs 命令行版解析器
 
 `DecompressionStream` 需要 Chrome / Edge 80+、Safari 16.4+、Firefox 113+。iPhone 上就是 iOS 16.4 及以上。
 
-切主题那圈扩散有两条路（见上面「深浅色」）：Chrome/Edge 走 View Transitions，Safari 和其余浏览器走自绘的覆盖层收缩，所以 iPhone 上一样是从按键位置展开。
+切主题那圈扩散有两条路（见上面「深浅色」）：Chrome/Edge 走 View Transitions，Safari 和其余浏览器走自绘的覆盖层扩散，所以 iPhone 上一样是从按键位置展开、由内向外。
 
 ## 实时预览（开发自用）
 
@@ -304,7 +306,7 @@ node tools/dev.mjs            # http://127.0.0.1:8777/preview.html
 | --- | --- | --- |
 | ✅ | 浅色为主 | 白卡 + 浅灰底，绿色主色，图表颜色全部换成变量 |
 | ✅ | 右上角切换 | 图标随当前主题换，选择存 `localStorage` |
-| ✅ | 从点击处展开 | Chrome/Edge 用 View Transitions 圆形揭示；Safari 走自绘覆盖层收缩（先盖旧底再换，不闪）；键盘触发退回按钮中心 |
+| ✅ | 从点击处展开 | Chrome/Edge 用 View Transitions 圆形揭示；Safari 走自绘层：新底色从点击点扩满整屏后才换主题；键盘触发退回按钮中心 |
 | 🔧 | **等确认：浅色够不够亮/够不够淡** | 自己点一下，觉得哪里刺眼或灰得发闷就说 |
 
 ### 阶段 3.8 · 对标 podhours（进行中）
