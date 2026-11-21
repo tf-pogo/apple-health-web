@@ -85,6 +85,8 @@ const TABS = [
   ['heart', '心脏'],
   ['sleep', '睡眠'],
   ['activity', '活动'],
+  ['energy', '能量'],
+  ['mobility', '移动'],
   ['devices', '设备'],
 ];
 
@@ -208,6 +210,8 @@ export function renderTab(k, ui) {
   else if (k === 'heart') viewHeart(R, v);
   else if (k === 'sleep') viewSleep(R, v);
   else if (k === 'activity') viewActivity(R, v);
+  else if (k === 'energy') viewEnergy(R, v);
+  else if (k === 'mobility') viewMobility(R, v);
   else viewDevices(R, v);
 }
 
@@ -234,7 +238,7 @@ function viewOverview(r, host) {
     stat(num(sleepSum) + ' 小时', '累计睡眠', ns.length + ' 夜 · 平均 ' +
       dec(ns.length ? sleepSum / ns.length : 0) + ' 小时') +
     stat(num(r.light.total / 60) + ' 小时', '晒太阳', num(r.light.total) + ' 分钟 · 按手表的日光暴露统计') +
-    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.total / days)) +
+    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.total / (r.steps.day.length || days))) +
     stat(num(r.dist.total) + ' km', '走过和跑过', '步行与跑步距离') +
     stat(num(r.energy.total), '千卡', '活动能量') +
     '</div>' +
@@ -256,6 +260,25 @@ function viewOverview(r, host) {
   h += card('数据从哪来', '全量 ' + r.sources.length + ' 个来源',
     '<div id="c-sources" class="chart"></div>',
     '同一部 iPhone 上装过的健康类 App 都会往里写数据，所以来源往往比设备多。');
+
+  // 手记的那些：条数都不多，但全是自己记的，跟手表采的不是一回事
+  const SYM = {
+    RapidPoundingOrFlutteringHeartbeat: '心悸 / 心跳过快',
+    Fatigue: '疲劳', ShortnessOfBreath: '气短', Dizziness: '头晕',
+  };
+  const odd = []
+    .concat(r.life.water.map(x => [x[0], '喝水', Math.round(x[1]) + ' mL']))
+    .concat(r.life.caffeine.map(x => [x[0], '咖啡因', Math.round(x[1]) + ' mg']))
+    .concat(r.life.mindful.map(x => [x[0], '正念', x[1] ? x[1] + ' 分钟' : '—']))
+    .concat(r.life.sex.map(x => [x[0], '性行为', x[1] ? x[1] + ' 分钟' : '—']))
+    .concat((r.symptoms || []).map(x => [x[0] + ' ' + x[1], '症状', SYM[x[2]] || x[2]]))
+    .concat((r.sleepGoal || []).map(x => [x[0], '睡眠目标', x[1] + ' 小时']))
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1));
+
+  h += card('零散但也在记的事', odd.length + ' 条手记 · 最近 ' + Math.min(16, odd.length) + ' 条',
+    odd.length ? table([['时间'], ['记了什么'], ['值', 'num']], odd.slice(0, 16).map(x =>
+      [esc(x[0]), esc(x[1]), esc(x[2])])) : '<p class="note">这段时间里没有手记。</p>',
+    '喝水、咖啡因、正念、睡眠目标和症状都是手动记的或第三方 App 写的，条数少，单独列出来免得被大数盖掉。');
 
   host.innerHTML = h;
   mount('#c-types', C.hbarsHTML(types.map(([k, n]) => ({
@@ -428,6 +451,34 @@ function viewActivity(r, host) {
   h += card('哪些天真的在走路', sd.length + ' 个有效日',
     '<div id="c-cal" class="chart"></div>',
     '每一格是一天，颜色越亮走得越多。中间那几片黑，不是没走路，是那段时间压根没戴表。');
+  // 三环：ActivitySummary 是手表每天自己汇总的 Move/Exercise/Stand，
+  // 和 Record 里的能量/运动分钟不是一回事，达成率只能用它算
+  const as = r.actsum || [];
+  const closedMove = as.filter(x => x.moveGoal && x.move >= x.moveGoal).length;
+  const closedEx = as.filter(x => x.exGoal && x.ex >= x.exGoal).length;
+  const closedStand = as.filter(x => x.standGoal && x.stand >= x.standGoal).length;
+  const allThree = as.filter(x =>
+    x.moveGoal && x.move >= x.moveGoal && x.exGoal && x.ex >= x.exGoal &&
+    x.standGoal && x.stand >= x.standGoal).length;
+
+  // 连续合上三环的最长天数
+  let run = 0, bestRun = 0;
+  as.forEach(x => {
+    const ok = x.moveGoal && x.move >= x.moveGoal && x.exGoal && x.ex >= x.exGoal &&
+               x.standGoal && x.stand >= x.standGoal;
+    run = ok ? run + 1 : 0;
+    if (run > bestRun) bestRun = run;
+  });
+
+  h += card('三环合上了几天', as.length + ' 天有活动摘要',
+    '<div id="c-rings" class="chart"></div>' +
+    '<div class="grid" style="margin-top:12px">' +
+      stat(as.length ? Math.round(closedMove / as.length * 100) + '%' : '—', '活动环达成率', closedMove + ' / ' + as.length + ' 天') +
+      stat(as.length ? Math.round(closedEx / as.length * 100) + '%' : '—', '锻炼环达成率', closedEx + ' / ' + as.length + ' 天') +
+      stat(as.length ? Math.round(closedStand / as.length * 100) + '%' : '—', '站立环达成率', closedStand + ' / ' + as.length + ' 天') +
+      stat(bestRun + ' 天', '最长连续全合上', '共 ' + allThree + ' 天三期都合上') +
+    '</div>',
+    '三环达成率只用 Apple 自己写的 ActivitySummary，和上面按 Record 累加的能量不是同一套口径。');
   h += card('运动记录', r.workouts.length + ' 次',
     '<div id="c-wk" class="chart"></div>', '');
 
@@ -438,10 +489,181 @@ function viewActivity(r, host) {
 
   host.innerHTML = h;
   mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4 }));
+  mount('#c-rings', C.hbarsHTML([
+    { name: '活动环 Move', value: closedMove, valueText: closedMove + ' / ' + as.length },
+    { name: '锻炼环 Exercise', value: closedEx, valueText: closedEx + ' / ' + as.length },
+    { name: '站立环 Stand', value: closedStand, valueText: closedStand + ' / ' + as.length },
+    { name: '三期全合上', value: allThree, valueText: allThree + ' / ' + as.length },
+  ], { color: 'var(--green)', labelW: 130 }));
   mount('#c-wk', C.hbarsHTML(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
   host.insertAdjacentHTML('beforeend', card('最近的运动',
     '最后 14 次',
     table([['时间'], ['类型'], ['时长', 'num'], ['距离', 'num'], ['千卡', 'num'], ['均心率', 'num']], rows)));
+}
+
+/* ---------------- 能量 ---------------- */
+
+/** [[日期, 值]] → [[YYYY-MM, 合计]] */
+function byMonthSum(arr) {
+  const m = new Map();
+  for (const [d, v] of arr) {
+    const k = String(d).slice(0, 7);
+    m.set(k, (m.get(k) || 0) + v);
+  }
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+}
+
+/** [[日期, 值]] → [[YYYY-MM, 月均]] */
+function byMonthAvg(arr) {
+  const s = new Map(), n = new Map();
+  for (const [d, v] of arr) {
+    const k = String(d).slice(0, 7);
+    s.set(k, (s.get(k) || 0) + v);
+    n.set(k, (n.get(k) || 0) + 1);
+  }
+  return [...s.entries()].map(([k, v]) => [k, +(v / n.get(k)).toFixed(2)])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+}
+
+function viewEnergy(r, host) {
+  const ef = r.effort;
+  const effDay = ef.day;
+  const best = effDay.slice().sort((a, b) => b[1] - a[1])[0];
+  const rest = r.basal.total, act = r.energy.total;
+  const standTot = r.standHour.stood + r.standHour.idle;
+
+  let h = '<div class="grid">' +
+    stat(dec(ef.avg, 2), '平均身体负荷', 'kcal/hr·kg · 峰值 ' + dec(ef.max, 1)) +
+    stat(best ? dec(best[1], 1) : '—', '最累的一天', best ? best[0] : '') +
+    stat(num(rest), '千卡静息', '躺着不动烧掉的') +
+    stat(num(act), '千卡活动', '动起来额外烧掉的') +
+    stat(dec(r.cycling.total, 1) + ' km', '骑行', '') +
+    stat(num(r.flights.total), '层楼', '爬楼梯') +
+    '</div>';
+
+  h += card('一天里，身体什么时候最累', num(ef.n) + ' 次采样 · 按小时平均',
+    '<div id="c-efclock" class="chart"></div>',
+    'Apple 的 PhysicalEffort 是「每分钟每公斤体重消耗多少千卡」，跟体重无关，能直接横向比较。凌晨 4 点前后最低，下午和傍晚最高。');
+  h += card('每天的身体负荷', effDay.length + ' 天',
+    '<div id="c-efday" class="chart"></div>',
+    '每天所有采样的平均值。曲线抬起来的那几段，是开始认真跑步之后。');
+  h += card('一天的能量从哪来', '静息 vs 活动',
+    '<div class="two-col"><div id="c-esplit" class="chart"></div><div id="c-esplit-legend"></div></div>',
+    '静息能量是基础代谢，活动能量是走路、运动额外加的那部分。');
+  h += card('每月爬了多少层楼', '按日汇总到月',
+    '<div id="c-flights" class="chart"></div>', '');
+  h += card('站立小时', num(standTot) + ' 个小时的判定',
+    '<div id="c-standh" class="chart"></div>',
+    '手表每小时判一次「站着」还是「坐着」，缺的那部分是没戴表的时段。');
+
+  host.innerHTML = h;
+  mount('#c-efclock', C.clockRing(ef.hourAvg, {
+    size: 400, min: 1.5, max: Math.max(5, Math.max.apply(null, ef.hourAvg)),
+    centerValue: ef.avg,
+    centerLabel: '平均负荷',
+    color: (v, lo, hi) => {
+      const t = (v - lo) / (hi - lo || 1);
+      return t > 0.8 ? 'var(--red)' : t > 0.55 ? 'var(--amber)' : 'var(--blue)';
+    },
+  }));
+  mount('#c-efday', C.line(effDay, { color: 'var(--amber)', w: CW, h: CH(230), pad: NARROW ? 30 : 34, minPad: 0.3 }));
+  mount('#c-esplit', C.donut([
+    { name: '静息', value: rest, color: 'var(--blue)' },
+    { name: '活动', value: act, color: 'var(--amber)' },
+  ], { size: 210 }));
+  mount('#c-esplit-legend', (() => {
+    const d = document.createElement('div');
+    d.className = 'legend';
+    d.style.flexDirection = 'column';
+    [['静息 ' + num(rest) + ' 千卡', 'var(--blue)'], ['活动 ' + num(act) + ' 千卡', 'var(--amber)']]
+      .forEach(([t, c]) => {
+        const s = document.createElement('span');
+        s.innerHTML = '<i style="background:' + c + '"></i>' + t;
+        d.appendChild(s);
+      });
+    return d;
+  })());
+
+  // 楼层：没直接存日明细的求和，用 byDay 里的 flights 现算
+  const fl = Object.keys(r.byDay).sort()
+    .filter(d => r.byDay[d].flights)
+    .map(d => [d, r.byDay[d].flights]);
+  mount('#c-flights', C.line(byMonthSum(fl).slice(-24), { color: 'var(--green)', w: CW, h: CH(200), pad: NARROW ? 30 : 34, minPad: 0 }));
+  mount('#c-standh', C.hbarsHTML([
+    { name: '站着', value: r.standHour.stood, valueText: num(r.standHour.stood) + ' 小时' },
+    { name: '坐着', value: r.standHour.idle, valueText: num(r.standHour.idle) + ' 小时',
+      sub: standTot ? Math.round(r.standHour.idle / standTot * 100) + '% 的时间' : '' },
+  ], { color: 'var(--cyan)', labelW: 90 }));
+}
+
+/* ---------------- 移动 ---------------- */
+
+function viewMobility(r, host) {
+  const g = r.gait;
+  const avg = arr => (arr.length ? arr.reduce((a, x) => a + x[1], 0) / arr.length : 0);
+  // 不对称/双支撑是长尾分布：一半的日子接近 0，偶尔跳到 40%，
+  // 均值会被那几天拉高，所以这两个用中位数
+  const med = arr => {
+    if (!arr.length) return 0;
+    const v = arr.map(x => x[1]).sort((a, b) => a - b);
+    return v[Math.floor(v.length / 2)];
+  };
+  const lastOf = arr => (arr.length ? arr[arr.length - 1][1] : 0);
+  // 单日值会被异常那天带跑（不对称最高到过 40%），取最近 7 天均值更稳
+  const recent = (arr, n) => {
+    const s = arr.slice(-(n || 7));
+    return s.length ? s.reduce((a, x) => a + x[1], 0) / s.length : 0;
+  };
+  // 双支撑/不对称/稳定度在导出里是 0–1 的比例，单位写着 % 但值不是百分数
+  const pctOf = arr => arr.map(x => [x[0], +(x[1] * 100).toFixed(1)]);
+
+  const spdAvg = avg(g.speed), spdLast = recent(g.speed);
+  const slAvg = avg(g.stepLen), slLast = recent(g.stepLen);
+  const dblAvg = med(g.dblSup) * 100, dblLast = recent(g.dblSup) * 100;
+  // 不对称一半的日子是 0（没有测出差异），中位数会变成 0.0%，这里仍用均值
+  const asymAvg = avg(g.asym) * 100, asymLast = recent(g.asym) * 100;
+  const steadyLast = lastOf(g.steady) * 100;
+  const sixLast = lastOf(g.sixmw);
+
+  let h = '<div class="grid">' +
+    stat(dec(spdAvg, 2) + ' km/h', '步行速度', '最近一周 ' + dec(spdLast, 2) + ' · ' + g.speed.length + ' 天') +
+    stat(dec(slAvg, 1) + ' cm', '步长', '最近一周 ' + dec(slLast, 1) + ' cm') +
+    stat(dec(dblAvg, 1) + '%', '双支撑占比', '中位数 · 最近一周 ' + dec(dblLast, 1) + '%') +
+    stat(dec(asymAvg, 1) + '%', '左右不对称', '越高越不平衡 · 最近一周 ' + dec(asymLast, 1) + '%') +
+    stat(steadyLast ? Math.round(steadyLast) + '%' : '—', '行走稳定度', g.steady.length + ' 次体检') +
+    stat(sixLast ? Math.round(sixLast) + ' m' : '—', '六分钟步行', g.sixmw.length + ' 次') +
+    '</div>';
+
+  h += card('走路有多快', '按日平均 · ' + g.speed.length + ' 天',
+    '<div id="c-spd" class="chart"></div>',
+    'Apple 在带手机走路时抽样估算的速度。起伏大是因为有时手里拿着东西、有时在跑。');
+  h += card('步幅', '按日平均 · ' + g.stepLen.length + ' 天',
+    '<div id="c-sl" class="chart"></div>', '');
+  h += card('双支撑占比', '按月平均',
+    '<div id="c-bal" class="chart"></div>',
+    '两只脚同时着地的时间占比，正常走路约 20–35%。这里是按月平均——六年基本没动过，一直在 29–31% 之间，中间那次下沉是 2025 年春天。');
+  h += card('上楼有多快', '按月平均',
+    '<div id="c-stair" class="chart"></div>',
+    'StairAscentSpeed 是手表在你爬楼时估算的垂直速度，一般 0.2–0.5 m/s。下楼速度波动更大，放在下面一起看。');
+  h += card('活动能力体检', '手表自己算的几项',
+    '<div id="c-fit" class="chart"></div>',
+    '行走稳定度来自 iPhone 走路时的姿态分析，六分钟步行是专门测的，步行心率是走路时的平均心率。');
+
+  host.innerHTML = h;
+  mount('#c-spd', C.line(g.speed, { color: 'var(--green)', w: CW, h: CH(220), pad: NARROW ? 30 : 34, minPad: 0.15 }));
+  mount('#c-sl', C.line(g.stepLen, { color: 'var(--blue)', w: CW, h: CH(200), pad: NARROW ? 30 : 34, minPad: 1 }));
+  mount('#c-bal', C.line(byMonthAvg(pctOf(g.dblSup)), { color: 'var(--amber)', w: CW, h: CH(210), pad: NARROW ? 30 : 34, minPad: 0.5 }));
+  mount('#c-stair', C.line(byMonthAvg(g.asc), { color: 'var(--violet)', w: CW, h: CH(200), pad: NARROW ? 30 : 34, minPad: 0.02 }));
+  mount('#c-fit', C.hbarsHTML([
+    { name: '行走稳定度', value: steadyLast, valueText: steadyLast ? Math.round(steadyLast) + '%' : '—',
+      sub: g.steady.length ? g.steady.length + ' 次 · 最低 ' + Math.round(Math.min.apply(null, g.steady.map(x => x[1])) * 100) + '%' : '' },
+    { name: '六分钟步行', value: sixLast, valueText: sixLast ? Math.round(sixLast) + ' m' : '—',
+      sub: g.sixmw.length + ' 次' },
+    { name: '步行心率', value: avg(g.walkHr), valueText: dec(avg(g.walkHr), 1) + ' bpm',
+      sub: g.walkHr.length + ' 天' },
+    { name: '上楼速度', value: avg(g.asc), valueText: dec(avg(g.asc), 2) + ' m/s', sub: '按日平均' },
+    { name: '下楼速度', value: avg(g.desc), valueText: dec(avg(g.desc), 2) + ' m/s', sub: '按日平均' },
+  ], { color: 'var(--cyan)', labelW: 130 }));
 }
 
 /* ---------------- 设备 ---------------- */

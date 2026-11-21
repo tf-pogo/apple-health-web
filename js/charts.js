@@ -97,10 +97,13 @@ export function line(points, opts) {
   const hi = Math.max.apply(null, ys) + o.minPad;
   const X = i => o.pad + (i / Math.max(1, points.length - 1)) * (o.w - o.pad * 2);
   const Y = v => o.h - o.pad - ((v - lo) / (hi - lo || 1)) * (o.h - o.pad * 2);
+  // 刻度位数跟着量级走：上楼速度这种 0.2–0.5 的值域，四舍五入到整数会变成一排 0
+  const span = hi - lo;
+  const dig = span >= 20 ? 0 : span >= 1.5 ? 1 : 2;
   for (let g = 0; g < 4; g++) {
-    const v = lo + (hi - lo) * g / 3;
+    const v = lo + span * g / 3;
     el('line', { x1: o.pad, y1: Y(v), x2: o.w - o.pad, y2: Y(v), stroke: 'var(--axis)' }, s);
-    el('text', { x: o.pad - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, Math.round(v));
+    el('text', { x: o.pad - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, v.toFixed(dig));
   }
   let d = '';
   points.forEach((p, i) => { d += (i ? ' L' : 'M') + X(i) + ' ' + Y(p[1]); });

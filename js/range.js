@@ -52,6 +52,14 @@ export function pick(r, from, to) {
   const hpHourN = new Array(24).fill(0), hpHourS = new Array(24).fill(0);
   const hist = new Array(r.hr.hist.length).fill(0);
   const hrDay = [], hpDay = [], stepDay = [], energyDay = [];
+  // 「全部数据」补进来的那批，同样只在日索引上求和
+  const effHourN = new Array(24).fill(0), effHourS = new Array(24).fill(0);
+  const effortDay = [], speedDay = [], stepLenDay = [], dblDay = [], asymDay = [];
+  const ascDay = [], descDay = [], whrDay = [];
+  let effS = 0, effN = 0, effMax = 0;
+  let basal = 0, cyc = 0, flights = 0, stood = 0, idle = 0;
+  let wsS = 0, wsN = 0, slS = 0, slN = 0, dblS = 0, dblN = 0, asymS = 0, asymN = 0;
+  let ascS = 0, ascN = 0, descS = 0, descN = 0, whrS = 0, whrN = 0;
 
   let hrN = 0, hrSum = 0, hrMin = Infinity, hrMax = 0;
   let hpN = 0, hpSum = 0, hpMax = 0, hpDur = 0, o80 = 0, o85 = 0, o90 = 0;
@@ -93,6 +101,22 @@ export function pick(r, from, to) {
     if (o.respN) { respN += o.respN; respSum += o.respS; }
     if (o.rhr) { rhrN++; rhrSum += o.rhr; rhrLast = [d, o.rhr]; }
     if (o.hrv) { hrvN++; hrvSum += o.hrv; }
+
+    if (o.effN) {
+      effS += o.effS; effN += o.effN;
+      if (o.effMax > effMax) effMax = o.effMax;
+      effortDay.push([d, +(o.effS / o.effN).toFixed(2)]);
+      for (let i = 0; i < 24; i++) { effHourN[i] += o.effH[i]; effHourS[i] += o.effH[24 + i]; }
+    }
+    basal += o.basal || 0; cyc += o.cyc || 0; flights += o.flights || 0;
+    stood += o.stood || 0; idle += o.idle || 0;
+    if (o.wsN) { wsS += o.wsS; wsN += o.wsN; speedDay.push([d, +(o.wsS / o.wsN).toFixed(2)]); }
+    if (o.slN) { slS += o.slS; slN += o.slN; stepLenDay.push([d, +(o.slS / o.slN).toFixed(1)]); }
+    if (o.dblN) { dblS += o.dblS; dblN += o.dblN; dblDay.push([d, +(o.dblS / o.dblN).toFixed(1)]); }
+    if (o.asymN) { asymS += o.asymS; asymN += o.asymN; asymDay.push([d, +(o.asymS / o.asymN).toFixed(1)]); }
+    if (o.ascN) { ascS += o.ascS; ascN += o.ascN; ascDay.push([d, +(o.ascS / o.ascN).toFixed(2)]); }
+    if (o.descN) { descS += o.descS; descN += o.descN; descDay.push([d, +(o.descS / o.descN).toFixed(2)]); }
+    if (o.whrN) { whrS += o.whrS; whrN += o.whrN; whrDay.push([d, +(o.whrS / o.whrN).toFixed(1)]); }
   }
 
   const pct = percentile(hist, hrN);
@@ -112,6 +136,28 @@ export function pick(r, from, to) {
     const d = (w.s || '').slice(0, 10);
     return (!from || d >= from) && (!to || d <= to);
   });
+  // 症状/事件/生活记录是明细，按日期过滤即可
+  const inRangeDay = d => (!from || d >= from) && (!to || d <= to);
+  const events = {
+    high: (r.events ? r.events.high : []).filter(x => inRangeDay(x[0])),
+    low: (r.events ? r.events.low : []).filter(x => inRangeDay(x[0])),
+  };
+  const symptoms = (r.symptoms || []).filter(x => inRangeDay(x[0]));
+  const breath = (r.breath || []).filter(x => inRangeDay(x[0]));
+  const wrist = (r.wrist || []).filter(x => inRangeDay(x[0]));
+  const afib = (r.afib || []).filter(x => inRangeDay(x[0]));
+  const hrrec = (r.hrrec || []).filter(x => inRangeDay(x[0]));
+  const steady = (r.gait.steady || []).filter(x => inRangeDay(x[0]));
+  const sixmw = (r.gait.sixmw || []).filter(x => inRangeDay(x[0]));
+  const sleepGoal = (r.sleepGoal || []).filter(x => inRangeDay(x[0]));
+  const fRange = a => (a || []).filter(x => inRangeDay(x[0]));
+  const life = {
+    water: fRange(r.life.water),
+    caffeine: fRange(r.life.caffeine),
+    mindful: fRange(r.life.mindful),
+    sex: fRange(r.life.sex),
+  };
+
   const actsum = (r.actsum || []).filter(x => {
     const d = (x.d || '').slice(0, 10);
     return (!from || d >= from) && (!to || d <= to);
@@ -175,6 +221,24 @@ export function pick(r, from, to) {
     light: { total: light },
     stand: { total: stand },
     exer: { total: exer },
+    effort: {
+      n: effN,
+      avg: +(effS / effN || 0).toFixed(2),
+      max: +effMax.toFixed(2),
+      day: effortDay,
+      hourAvg: effHourS.map((s, i) => (effHourN[i] ? +(s / effHourN[i]).toFixed(2) : 0)),
+    },
+    basal: { total: Math.round(basal) },
+    cycling: { total: +cyc.toFixed(1) },
+    flights: { total: Math.round(flights) },
+    standHour: { stood, idle },
+    gait: {
+      speed: speedDay, stepLen: stepLenDay, dblSup: dblDay, asym: asymDay,
+      asc: ascDay, desc: descDay, walkHr: whrDay,
+      steady, sixmw,
+    },
+    breath, wrist, afib, hrrec,
+    events, symptoms, life, sleepGoal,
     byDay,
   };
 }

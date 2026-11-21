@@ -21,6 +21,36 @@ const SLEEP = 'HKCategoryTypeIdentifierSleepAnalysis';
 const LIGHT = 'HKQuantityTypeIdentifierTimeInDaylight';
 const STAND = 'HKQuantityTypeIdentifierAppleStandTime';
 const EXER = 'HKQuantityTypeIdentifierAppleExerciseTime';
+// 下面这批原先只出现在导出文件里，没进统计。收进来才叫"全部数据"
+const EFFORT = 'HKQuantityTypeIdentifierPhysicalEffort';
+const BASAL = 'HKQuantityTypeIdentifierBasalEnergyBurned';
+const CYCLING = 'HKQuantityTypeIdentifierDistanceCycling';
+const FLIGHTS = 'HKQuantityTypeIdentifierFlightsClimbed';
+const STANDHOUR = 'HKCategoryTypeIdentifierAppleStandHour';
+const WSPEED = 'HKQuantityTypeIdentifierWalkingSpeed';
+const WSTEPLEN = 'HKQuantityTypeIdentifierWalkingStepLength';
+const WDBLSUP = 'HKQuantityTypeIdentifierWalkingDoubleSupportPercentage';
+const WASYM = 'HKQuantityTypeIdentifierWalkingAsymmetryPercentage';
+const SASCEND = 'HKQuantityTypeIdentifierStairAscentSpeed';
+const SDESCEND = 'HKQuantityTypeIdentifierStairDescentSpeed';
+const WALKHR = 'HKQuantityTypeIdentifierWalkingHeartRateAverage';
+const STEADY = 'HKQuantityTypeIdentifierAppleWalkingSteadiness';
+const SIXMW = 'HKQuantityTypeIdentifierSixMinuteWalkTestDistance';
+const BREATHD = 'HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances';
+const WRISTM = 'HKQuantityTypeIdentifierAppleSleepingWristTemperature';
+const AFIB = 'HKQuantityTypeIdentifierAtrialFibrillationBurden';
+const HRREC = 'HKQuantityTypeIdentifierHeartRateRecoveryOneMinute';
+const HIGHHR = 'HKCategoryTypeIdentifierHighHeartRateEvent';
+const LOWHR = 'HKCategoryTypeIdentifierLowHeartRateEvent';
+const RSYM = 'HKCategoryTypeIdentifierRapidPoundingOrFlutteringHeartbeat';
+const SYMFATIGUE = 'HKCategoryTypeIdentifierFatigue';
+const SYMBREATH = 'HKCategoryTypeIdentifierShortnessOfBreath';
+const SYMDIZZY = 'HKCategoryTypeIdentifierDizziness';
+const WATER = 'HKQuantityTypeIdentifierDietaryWater';
+const CAFFEINE = 'HKQuantityTypeIdentifierDietaryCaffeine';
+const MINDFUL = 'HKCategoryTypeIdentifierMindfulSession';
+const SEXACT = 'HKCategoryTypeIdentifierSexualActivity';
+const SLEEPGOAL = 'HKDataTypeSleepDurationGoal';
 
 const HR_BIN = 5, HR_MIN = 30, HR_MAX = 220;
 
@@ -61,7 +91,21 @@ export function createAggregator() {
     actsum: [],
     byDay: new Map(),
     cur: null,
-    eventHigh: [], eventLow: [],
+    // 下面这些都是「一条记录一个点」，条数不多（几十到几百），直接留明细数组
+    effort: { n: 0, sum: 0, max: 0, day: new Map(), hourN: new Array(24).fill(0), hourSum: new Array(24).fill(0) },
+    basal: { total: 0, day: new Map() },
+    cycling: { total: 0, day: new Map() },
+    flights: { total: 0, day: new Map() },
+    standHour: { stood: 0, idle: 0 },
+    gait: {
+      speed: [], stepLen: [], dblSup: [], asym: [],
+      asc: [], desc: [], steady: [], sixmw: [], walkHr: [],
+    },
+    breath: [], wrist: [], afib: [], hrrec: [],
+    events: { high: [], low: [] },
+    symptoms: [],
+    life: { water: [], caffeine: [], mindful: [], sex: [] },
+    sleepGoal: [],
   };
 }
 
@@ -91,6 +135,12 @@ function drec(a, day) {
       spo2N: 0, spo2S: 0, spo2Min: 100, spo2Low: 0,
       respN: 0, respS: 0,
       rhrSum: 0, rhrN: 0, hrvSum: 0, hrvN: 0,
+      effort: 0, effortN: 0, effortMax: 0, effH: new Array(48).fill(0),
+      basal: 0, cyc: 0, flights: 0,
+      wsSum: 0, wsN: 0, slSum: 0, slN: 0,
+      dblSum: 0, dblN: 0, asymSum: 0, asymN: 0,
+      ascSum: 0, ascN: 0, descSum: 0, descN: 0,
+      stood: 0, idle: 0, whrSum: 0, whrN: 0,
     };
     a.byDay.set(day, d);
   }
@@ -329,6 +379,145 @@ export function feedLine(a, line) {
         else kd.exer += v;
         break;
       }
+      // 身体负荷：单位 kcal/(hr·kg)，和体重没关系，可以直接比较强度
+      case EFFORT: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v) || v < 0) return;
+        const st = attr(tag, 'startDate');
+        const day = st.slice(0, 10);
+        a.effort.n++; a.effort.sum += v;
+        if (v > a.effort.max) a.effort.max = v;
+        const hh = +st.slice(11, 13);
+        a.effort.hourN[hh]++; a.effort.hourSum[hh] += v;
+        addTo(a.effort.day, day, v);
+        const d = drec(a, day);
+        d.effort += v; d.effortN++;
+        if (v > d.effortMax) d.effortMax = v;
+        d.effH[hh]++; d.effH[24 + hh] += v;
+        break;
+      }
+      case BASAL: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        a.basal.total += v;
+        addTo(a.basal.day, day, v);
+        drec(a, day).basal += v;
+        break;
+      }
+      case CYCLING: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        a.cycling.total += v;
+        addTo(a.cycling.day, day, v);
+        drec(a, day).cyc += v;
+        break;
+      }
+      case FLIGHTS: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        a.flights.total += v;
+        addTo(a.flights.day, day, v);
+        drec(a, day).flights += v;
+        break;
+      }
+      // 站立小时是分类值，只统计站了/没站
+      case STANDHOUR: {
+        const v = attr(tag, 'value');
+        const day = attr(tag, 'startDate').slice(0, 10);
+        const d = drec(a, day);
+        if (v.indexOf('Stood') >= 0) { a.standHour.stood++; d.stood++; }
+        else if (v.indexOf('Idle') >= 0) { a.standHour.idle++; d.idle++; }
+        break;
+      }
+      // 步态：速度和步长是成对的，双支撑/不对称是平衡指标，上下楼是爆发力
+      case WSPEED:
+      case WSTEPLEN:
+      case WDBLSUP:
+      case WASYM:
+      case SASCEND:
+      case SDESCEND:
+      case WALKHR: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const st = attr(tag, 'startDate');
+        const day = st.slice(0, 10);
+        const d = drec(a, day);
+        if (type === WSPEED) { a.gait.speed.push([day, v]); d.wsSum += v; d.wsN++; }
+        else if (type === WSTEPLEN) { a.gait.stepLen.push([day, v]); d.slSum += v; d.slN++; }
+        else if (type === WDBLSUP) { a.gait.dblSup.push([day, v]); d.dblSum += v; d.dblN++; }
+        else if (type === WASYM) { a.gait.asym.push([day, v]); d.asymSum += v; d.asymN++; }
+        else if (type === SASCEND) { a.gait.asc.push([day, v]); d.ascSum += v; d.ascN++; }
+        else if (type === SDESCEND) { a.gait.desc.push([day, v]); d.descSum += v; d.descN++; }
+        else { a.gait.walkHr.push([day, v]); d.whrSum += v; d.whrN++; }
+        break;
+      }
+      case STEADY:
+      case SIXMW: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        (type === STEADY ? a.gait.steady : a.gait.sixmw).push([day, v]);
+        break;
+      }
+      case BREATHD:
+      case WRISTM:
+      case AFIB:
+      case HRREC: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        if (type === BREATHD) a.breath.push([day, v]);
+        else if (type === WRISTM) a.wrist.push([day, v]);
+        else if (type === AFIB) a.afib.push([day, v]);
+        else a.hrrec.push([day, v]);
+        break;
+      }
+      // 高/低心率事件：Apple 自己判定并通知过的那几次
+      case HIGHHR:
+      case LOWHR: {
+        const st = attr(tag, 'startDate');
+        if (!st) return;
+        (type === HIGHHR ? a.events.high : a.events.low).push([st.slice(0, 10), st.slice(11, 16)]);
+        break;
+      }
+      // 自己记下来的症状：和当天心率一起看才有意义
+      case RSYM:
+      case SYMFATIGUE:
+      case SYMBREATH:
+      case SYMDIZZY: {
+        const st = attr(tag, 'startDate');
+        if (!st) return;
+        a.symptoms.push([st.slice(0, 10), st.slice(11, 16), type
+          .replace('HKCategoryTypeIdentifier', '')]);
+        break;
+      }
+      case WATER:
+      case CAFFEINE: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const day = attr(tag, 'startDate').slice(0, 10);
+        (type === WATER ? a.life.water : a.life.caffeine).push([day, v]);
+        break;
+      }
+      case MINDFUL:
+      case SEXACT: {
+        const st = attr(tag, 'startDate');
+        const en = attr(tag, 'endDate');
+        if (!st || !en) return;
+        const mins = (parseDate(en) - parseDate(st)) / 60000;
+        (type === MINDFUL ? a.life.mindful : a.life.sex)
+          .push([st.slice(0, 10), Math.max(0, Math.round(mins))]);
+        break;
+      }
+      case SLEEPGOAL: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        a.sleepGoal.push([attr(tag, 'startDate').slice(0, 10), v]);
+        break;
+      }
       default:
         break;
     }
@@ -505,8 +694,37 @@ export function finalize(a) {
       respS: +o.respS.toFixed(1),
       rhr: o.rhrN ? +(o.rhrSum / o.rhrN).toFixed(1) : 0,
       hrv: o.hrvN ? +(o.hrvSum / o.hrvN).toFixed(1) : 0,
+      // 下面这批是「全部数据」补进来的：能量构成、步态、站立小时
+      effS: +o.effort.toFixed(1), effN: o.effortN, effMax: +o.effortMax.toFixed(2),
+      effH: o.effH.map(v => +v.toFixed(1)),
+      basal: Math.round(o.basal), cyc: +o.cyc.toFixed(2), flights: o.flights,
+      wsN: o.wsN, wsS: +(o.wsSum).toFixed(2),
+      slN: o.slN, slS: +o.slSum.toFixed(2),
+      dblN: o.dblN, dblS: +o.dblSum.toFixed(2),
+      asymN: o.asymN, asymS: +o.asymSum.toFixed(2),
+      ascN: o.ascN, ascS: +o.ascSum.toFixed(2),
+      descN: o.descN, descS: +o.descSum.toFixed(2),
+      stood: o.stood, idle: o.idle,
+      whrN: o.whrN, whrS: +o.whrSum.toFixed(1),
     };
   }
+
+  // 同一天可能有多条步态记录，先按日求平均再画线，否则一天的抖动会被画成锯齿
+  const byDayAvg = arr => {
+    const m = new Map();
+    for (const [d, v] of arr) {
+      const o = m.get(d);
+      if (o) { o.s += v; o.n++; }
+      else m.set(d, { s: v, n: 1 });
+    }
+    return [...m.entries()]
+      .map(([d, o]) => [d, +(o.s / o.n).toFixed(2)])
+      .sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  };
+
+  const effortDay = [...a.effort.day.entries()]
+    .map(([d, v]) => [d, +v.toFixed(1)])
+    .sort((x, y) => (x[0] < y[0] ? -1 : 1));
 
   const sources = Object.entries(a.sources).sort((x, y) => y[1] - x[1]);
   const devices = Object.entries(a.devices).sort((x, y) => y[1] - x[1]);
@@ -585,6 +803,36 @@ export function finalize(a) {
     light: { total: Math.round(lightAll) },
     stand: { total: Math.round(standAll) },
     exer: { total: Math.round(exerAll) },
+    effort: {
+      n: a.effort.n,
+      avg: +(a.effort.sum / a.effort.n || 0).toFixed(2),
+      max: +a.effort.max.toFixed(2),
+      day: effortDay,
+      hourAvg: a.effort.hourSum.map((s, i) => (a.effort.hourN[i] ? +(s / a.effort.hourN[i]).toFixed(2) : 0)),
+    },
+    basal: { total: Math.round(a.basal.total) },
+    cycling: { total: +a.cycling.total.toFixed(1) },
+    flights: { total: Math.round(a.flights.total) },
+    standHour: { stood: a.standHour.stood, idle: a.standHour.idle },
+    gait: {
+      speed: byDayAvg(a.gait.speed),
+      stepLen: byDayAvg(a.gait.stepLen),
+      dblSup: byDayAvg(a.gait.dblSup),
+      asym: byDayAvg(a.gait.asym),
+      asc: byDayAvg(a.gait.asc),
+      desc: byDayAvg(a.gait.desc),
+      walkHr: byDayAvg(a.gait.walkHr),
+      steady: byDayAvg(a.gait.steady),
+      sixmw: byDayAvg(a.gait.sixmw),
+    },
+    breath: byDayAvg(a.breath),
+    wrist: byDayAvg(a.wrist),
+    afib: byDayAvg(a.afib),
+    hrrec: byDayAvg(a.hrrec),
+    events: a.events,
+    symptoms: a.symptoms.sort((x, y) => (x[0] < y[0] ? -1 : 1)),
+    life: a.life,
+    sleepGoal: a.sleepGoal.sort((x, y) => (x[0] < y[0] ? -1 : 1)),
     byDay,
   };
 }

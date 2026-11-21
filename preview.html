@@ -87,7 +87,8 @@ import { initTheme } from './js/theme.js';
 initTheme(document.getElementById('theme'));
 
 const $ = id => document.getElementById(id);
-const KEYS = ['overview', 'audio', 'heart', 'sleep', 'activity', 'devices'];
+// 以 DOM 里真实渲染出来的 tab 为准，加新页不用回来改这里
+const KEYS = () => [...document.querySelectorAll('#tabs button[data-k]')].map(b => b.dataset.k);
 const MEM = 'preview:state';
 
 let ui = null;
@@ -114,7 +115,7 @@ function remember() {
 function restore() {
   // ?tab=heart 直接落在那页，优先于上次停留的位置（截图和分享用）
   const q = new URLSearchParams(location.search).get('tab');
-  if (q && KEYS.includes(q)) {
+  if (q && KEYS().includes(q)) {
     document.querySelectorAll('#tabs button').forEach(b =>
       b.setAttribute('aria-selected', String(b.dataset.k === q)));
     renderTab(q, ui);
@@ -123,7 +124,7 @@ function restore() {
   let s = null;
   try { s = JSON.parse(sessionStorage.getItem(MEM) || 'null'); } catch {}
   if (!s) return;
-  if (s.k && KEYS.includes(s.k)) {
+  if (s.k && KEYS().includes(s.k)) {
     document.querySelectorAll('#tabs button').forEach(b =>
       b.setAttribute('aria-selected', String(b.dataset.k === s.k)));
     renderTab(s.k, ui);
