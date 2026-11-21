@@ -1,19 +1,30 @@
 import * as C from './charts.js';
 import { pick, spanOf, PRESETS } from './range.js';
 
+// SVG 是整体缩放的：viewBox 900 压到手机 332 显示时，10px 的字只剩 3.7px。
+// 所以窄屏改用接近真实宽度的小画布，元素重排、字号不变。
+const NARROW = typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches;
+const CW = NARROW ? 360 : 900;
+const CH = k => (NARROW ? Math.round(k * 1.35) : k);   // 窄屏给高一点，形状别被压扁
+
 const nf = new Intl.NumberFormat('zh-CN');
 function num(v) { return nf.format(Math.round(v)); }
 function dec(v, d) { return (+v).toFixed(d == null ? 1 : d); }
 function bytes(b) { if (b > 1073741824) return dec(b / 1073741824) + ' GB'; if (b > 1048576) return dec(b / 1048576) + ' MB'; return Math.round(b / 1024) + ' KB'; }
 function hm(hours) { const h = Math.floor(hours), m = Math.round((hours - h) * 60); return h + ' 小时 ' + m + ' 分'; }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-function mount(sel, node) { const h = document.querySelector(sel); if (h && node) h.appendChild(node); }
+function mount(sel, node) {
+  const h = document.querySelector(sel);
+  if (!h || node == null) return;
+  if (typeof node === 'string') h.innerHTML = node;
+  else h.appendChild(node);
+}
 function stat(v, label, sub) { return '<div class="stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>'; }
 function card(title, sub, body, note) { return '<div class="card"><h3>' + title + (sub ? ' <span>' + sub + '</span>' : '') + '</h3>' + body + (note ? '<p class="note">' + note + '</p>' : '') + '</div>'; }
 function table(head, rows) {
-  let h = '<table class="data"><thead><tr>' + head.map(x => '<th' + (x[1] ? ' class="' + x[1] + '"' : '') + '>' + x[0] + '</th>').join('') + '</tr></thead><tbody>';
+  let h = '<div class="table-wrap"><table class="data"><thead><tr>' + head.map(x => '<th' + (x[1] ? ' class="' + x[1] + '"' : '') + '>' + x[0] + '</th>').join('') + '</tr></thead><tbody>';
   rows.forEach(r => { h += '<tr>' + r.map((c, i) => '<td' + (head[i] && head[i][1] ? ' class="' + head[i][1] + '"' : '') + '>' + c + '</td>').join('') + '</tr>'; });
-  return h + '</tbody></table>';
+  return h + '</tbody></table></div>';
 }
 
 const LABEL = {
@@ -247,12 +258,12 @@ function viewOverview(r, host) {
     '同一部 iPhone 上装过的健康类 App 都会往里写数据，所以来源往往比设备多。');
 
   host.innerHTML = h;
-  mount('#c-types', C.hbars(types.map(([k, n]) => ({
+  mount('#c-types', C.hbarsHTML(types.map(([k, n]) => ({
     name: labelOf(k), value: n,
     sub: dec(n / total * 100) + '%',
     valueText: num(n),
   })), { color: 'var(--green)', maxItems: 10 }));
-  mount('#c-sources', C.hbars(r.sources.slice(0, 10).map(([k, n]) => ({
+  mount('#c-sources', C.hbarsHTML(r.sources.slice(0, 10).map(([k, n]) => ({
     name: k, value: n, valueText: num(n),
   })), { color: 'var(--blue)' }));
 }
@@ -279,7 +290,7 @@ function viewAudio(r, host) {
     '<div id="c-day" class="chart"></div>', '');
 
   host.innerHTML = h;
-  mount('#c-dev', C.hbars(hp.devices.slice(0, 12).map(d => ({
+  mount('#c-dev', C.hbarsHTML(hp.devices.slice(0, 12).map(d => ({
     name: d.name, value: d.hours || d.n,
     sub: num(d.n) + ' 次采样 · 均值 ' + d.avg + ' dB · 峰值 ' + d.max,
     valueText: d.hours ? (d.hours >= 10 ? Math.round(d.hours) : d.hours.toFixed(1)) + ' h' : '—',
@@ -294,7 +305,7 @@ function viewAudio(r, host) {
     },
   }));
   const recent = hp.day.slice(-120);
-  mount('#c-day', C.bars(recent.map(d => d[1]), { w: 900, h: 170, color: 'var(--amber)', labels: false }));
+  mount('#c-day', C.bars(recent.map(d => d[1]), { w: CW, h: CH(170), color: 'var(--amber)', labels: false }));
 }
 
 /* ---------------- 心脏 ---------------- */
@@ -326,8 +337,8 @@ function viewHeart(r, host) {
     centerLabel: '中位心率',
     color: (v) => v >= 100 ? 'var(--red)' : v >= 85 ? 'var(--amber)' : 'var(--blue)',
   }));
-  mount('#c-hist', C.histogram(hr.hist, { min: hr.histMin, bin: hr.histBin, color: 'var(--red)' }));
-  mount('#c-hrday', C.line(hr.day.map(d => [d[0], d[1]]), { color: 'var(--green)', w: 900, h: 230 }));
+  mount('#c-hist', C.histogram(hr.hist, { min: hr.histMin, bin: hr.histBin, color: 'var(--red)', w: CW, h: CH(180) }));
+  mount('#c-hrday', C.line(hr.day.map(d => [d[0], d[1]]), { color: 'var(--green)', w: CW, h: CH(230), pad: NARROW ? 30 : 34 }));
 }
 
 /* ---------------- 睡眠 ---------------- */
@@ -366,14 +377,15 @@ function viewSleep(r, host) {
   h += card('每一夜，从几点睡到几点', ns.length + ' 夜',
     '<div id="c-bands" class="chart"></div>',
     '一条线是一夜，贴着轴往下掉就是越睡越晚的时段。纵轴把中午 12 点当成 0 点，这样跨零点的夜晚才连得起来。');
-  h += card('睡多久', '最近 ' + Math.min(90, ns.length) + ' 夜',
+  const lenN = Math.min(NARROW ? 60 : 90, ns.length);
+  h += card('睡多久', '最近 ' + lenN + ' 夜',
     '<div id="c-len" class="chart"></div>', '');
   h += card('睡眠结构', '平均每晚',
     '<div class="two-col"><div id="c-donut" class="chart"></div><div id="c-donut-legend"></div></div>', '');
 
   host.innerHTML = h;
-  mount('#c-bands', C.sleepBands(ns, { w: 900, h: 280 }));
-  mount('#c-len', C.bars(ns.slice(-90).map(x => x.asleep), { w: 900, h: 170, color: 'var(--blue)', labels: false }));
+  mount('#c-bands', C.sleepBands(ns, { w: CW, h: CH(280), padL: NARROW ? 36 : 44 }));
+  mount('#c-len', C.bars(ns.slice(-lenN).map(x => x.asleep), { w: CW, h: CH(170), color: 'var(--blue)', labels: false }));
   mount('#c-donut', C.donut([
     { name: '深睡', value: avgDeep, color: 'var(--green)' },
     { name: '核心', value: avgCore, color: 'var(--blue)' },
@@ -426,7 +438,7 @@ function viewActivity(r, host) {
 
   host.innerHTML = h;
   mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4 }));
-  mount('#c-wk', C.hbars(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
+  mount('#c-wk', C.hbarsHTML(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
   host.insertAdjacentHTML('beforeend', card('最近的运动',
     '最后 14 次',
     table([['时间'], ['类型'], ['时长', 'num'], ['距离', 'num'], ['千卡', 'num'], ['均心率', 'num']], rows)));
@@ -459,7 +471,7 @@ function viewDevices(r, host) {
     '这些是「健康」App 里填过的基础信息，没填就是 NotSet。');
 
   host.innerHTML = h;
-  mount('#c-src', C.hbars(r.sources.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--violet)', maxItems: 12 }));
-  mount('#c-dev2', C.hbars(r.devices.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--cyan)', maxItems: 12 }));
+  mount('#c-src', C.hbarsHTML(r.sources.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--violet)', maxItems: 12 }));
+  mount('#c-dev2', C.hbarsHTML(r.devices.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--cyan)', maxItems: 12 }));
 }
 

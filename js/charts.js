@@ -138,6 +138,26 @@ export function hbars(items, opts) {
   return s;
 }
 
+/**
+ * 横向条形（HTML 版）。SVG 版在手机上是整体缩放的，900 宽的 viewBox 压到 340 显示时
+ * 12.5px 的字会变成 4.7px；这版直接排成 div，字是真字号，窄屏能自己换行。
+ */
+export function hbarsHTML(items, opts) {
+  const o = Object.assign({ maxItems: 10, color: 'var(--blue)', labelW: 150 }, opts || {});
+  const list = items.slice(0, o.maxItems);
+  const max = Math.max.apply(null, list.map(i => i.value)) || 1;
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  return '<div class="hbars" style="--lab:' + o.labelW + 'px">' + list.map(it => {
+    const w = Math.max(2, (it.value / max) * 100).toFixed(1);
+    return '<div class="hrow">' +
+        '<b class="hname" title="' + esc(it.name) + '">' + esc(it.name) + '</b>' +
+        '<div class="hbar"><i style="width:' + w + '%;background:' + o.color + '"></i></div>' +
+        '<span class="hval">' + esc(it.valueText != null ? it.valueText : it.value) + '</span>' +
+        (it.sub ? '<span class="hsub">' + esc(it.sub) + '</span>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+}
+
 /** 环形占比：parts = [{name, value, color}] */
 export function donut(parts, opts) {
   const o = Object.assign({ size: 220, hole: 0.62 }, opts || {});

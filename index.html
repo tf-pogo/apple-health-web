@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>健康档案 · Apple Health 可视化</title>
 <meta name="description" content="在浏览器本地解析 Apple「健康」App 导出的压缩包，生成耳机、心率、睡眠、活动与设备报告。文件不会上传。">
 <meta name="color-scheme" content="light dark">
@@ -29,7 +29,7 @@
   <section id="landing" class="landing">
     <h1>你的身体，<em>六年的日志</em></h1>
     <p class="lede">
-      把 iPhone「健康」App 导出的 <code>导出.zip</code> 拖进来，
+      把 iPhone「健康」App 导出的 <code>导出.zip</code> 选进来，
       看看耳朵听了多久、心脏什么时候最累、哪几个月真的在走路。
     </p>
 
@@ -38,8 +38,8 @@
         <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
               fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
-      <strong>拖入 导出.zip</strong>
-      <span>或点击选择文件</span>
+      <strong>选一个 导出.zip</strong>
+      <span>点按选择，或者把它拖进来</span>
       <input id="file" type="file" accept=".zip,application/zip" hidden>
     </div>
 
@@ -54,7 +54,7 @@
         <li>打开 iPhone 的「健康」App → 右上角头像。</li>
         <li>滑到最底下 →「导出所有健康数据」。</li>
         <li>等它生成，通过 AirDrop / 微信文件传输 / iCloud 发到电脑。</li>
-        <li>把那个 <code>导出.zip</code> 拖到上面。</li>
+        <li>回到这一页，点上面的方块选那个 <code>导出.zip</code>（存在「文件」App 里就行）。</li>
       </ol>
     </details>
   </section>

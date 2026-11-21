@@ -124,6 +124,7 @@ export function pick(r, from, to) {
   return {
     locale: r.locale,
     exportDate: r.exportDate,
+    meta: r.meta,          // 文件数/压缩包大小/解析耗时：跟范围无关，原样带过去
     firstDate: sel.length ? sel[0] : (from || r.firstDate),
     lastDate: sel.length ? sel[sel.length - 1] : (to || r.lastDate),
     days: sel.length,

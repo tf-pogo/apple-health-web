@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>预览 · 健康档案</title>
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="css/style.css">
@@ -29,6 +29,14 @@
     border-radius: 5px; padding: 2px 8px; cursor: pointer;
   }
   #devbar button:hover { color: var(--text); border-color: var(--dim); }
+  @media (max-width: 720px) {
+    body { padding-top: 26px; }
+    #devbar { height: 26px; gap: 7px; padding: 0 10px; font-size: 10.5px; }
+    #devbar .sep, #dbsrc, #dbcopy, #devbar .sp { display: none; }
+    #dbstat { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #dbtime { white-space: nowrap; }
+    #devbar button.theme-toggle { width: 20px; height: 20px; }
+  }
   #devmsg {
     max-width: 980px; margin: 60px auto; padding: 24px;
     border: 1px solid var(--line); border-radius: 12px; color: var(--text);
