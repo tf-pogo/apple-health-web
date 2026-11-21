@@ -958,13 +958,51 @@ function viewActivity(r, host) {
       stat(bestRun + ' 天', '最长连续全合上', '共 ' + allThree + ' 天三期都合上') +
     '</div>',
     '三环达成率只用 Apple 自己写的 ActivitySummary，和上面按 Record 累加的能量不是同一套口径。');
-  h += card('运动记录', r.workouts.length + ' 次',
-    '<div id="c-wk" class="chart"></div>', '');
+  if (wk.length) {
+    h += card('都做了什么运动', r.workouts.length + ' 次',
+      '<div id="c-wk" class="chart"></div>', '');
+  }
 
-  const rows = r.workouts.slice(-14).reverse().map(w =>
-    [esc(w.s.slice(0, 16)), esc(labelOf('Workout:' + w.t)), Math.round(w.dur) + ' 分',
-     w.dist ? dec(w.dist, 2) + ' km' : '—', w.kcal ? Math.round(w.kcal) : '—',
-     w.avgHr ? Math.round(w.avgHr) : '—']);
+  // 运动的节奏：一段流水账（哪天跑了多少公里）读不出任何东西，
+  // 换成「一周里哪几天动」「一天里什么时点动」，规律才浮出来
+  const wkn = r.workouts;
+  let wdItems = [], partItems = [];
+  if (wkn.length) {
+    const hourOf = w => +String(w.s).slice(11, 13) || 0;
+    const wdOf = w => new Date(String(w.s).slice(0, 10) + 'T00:00:00Z').getUTCDay();
+    const wdCount = [0, 0, 0, 0, 0, 0, 0];
+    const hrCount = new Array(24).fill(0);
+    wkn.forEach(w => { wdCount[wdOf(w)]++; hrCount[hourOf(w)]++; });
+    wdItems = [1, 2, 3, 4, 5, 6, 0].map(i => ({ name: WD[i], value: wdCount[i], valueText: wdCount[i] + ' 次' }));
+    partItems = PARTS.map(pg => {
+      let c = 0;
+      for (let i = pg[1]; i < pg[2]; i++) c += hrCount[i];
+      return { name: pg[0], value: c, valueText: c + ' 次' };
+    }).filter(x => x.value > 0);
+    const mCount = new Map();
+    wkn.forEach(w => { const k = String(w.s).slice(0, 7); mCount.set(k, (mCount.get(k) || 0) + 1); });
+    const topM = [...mCount.entries()].sort((a, b) => b[1] - a[1])[0];
+    const totalMin = wkn.reduce((s, w) => s + w.dur, 0);
+    const longest = wkn.slice().sort((a, b) => b.dur - a.dur)[0];
+    const maxWd = Math.max(...wdItems.map(x => x.value));
+    const topNames = wdItems.filter(x => x.value === maxWd).map(x => x.name);
+    const wdNote = topNames.length > 1
+      ? topNames.join('、') + ' 各 ' + maxWd + ' 次'
+      : topNames[0] + ' 最多，' + maxWd + ' 次';
+    h += card('运动的节奏', wkn.length + ' 次 · 按开始时间摊开',
+      '<div class="grid" style="margin-bottom:6px">' +
+        stat(Math.round(totalMin / wkn.length) + ' 分', '平均每次', num(Math.round(totalMin)) + ' 分钟总共') +
+        stat(Math.round(longest.dur) + ' 分', '最长一次', String(longest.s).slice(0, 10)) +
+        stat(dec((r.days || 0) / wkn.length, 1) + ' 天', '多久动一次', '这段范围 ' + (r.days || 0) + ' 天') +
+        stat(topM[1] + ' 次', '动得最多的月份', topM[0]) +
+      '</div>' +
+      '<div class="subhead">一周里的哪几天</div><div id="c-wd" class="chart"></div>' +
+      '<div class="subhead">一天里的什么时段</div><div id="c-part" class="chart"></div>',
+      '按每次运动开始的时间归类。' + (maxWd ? wdNote + '。' : ''));
+  } else {
+    h += card('运动的节奏', '',
+      '<p class="note">这段范围里没有记录到运动。把范围放宽到「近一年」或「全部」再看。</p>', '');
+  }
 
   host.innerHTML = h;
   mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4 }));
@@ -974,10 +1012,13 @@ function viewActivity(r, host) {
     { name: '站立环 Stand', value: closedStand, valueText: closedStand + ' / ' + as.length },
     { name: '三期全合上', value: allThree, valueText: allThree + ' / ' + as.length },
   ], { color: 'var(--green)', labelW: 130 }));
-  mount('#c-wk', C.hbarsHTML(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
-  host.insertAdjacentHTML('beforeend', card('最近的运动',
-    '最后 14 次',
-    table([['时间'], ['类型'], ['时长', 'num'], ['距离', 'num'], ['千卡', 'num'], ['均心率', 'num']], rows)));
+  if (wk.length) {
+    mount('#c-wk', C.hbarsHTML(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
+  }
+  if (wkn.length) {
+    mount('#c-wd', C.hbarsHTML(wdItems, { color: 'var(--blue)', labelW: 74 }));
+    mount('#c-part', C.hbarsHTML(partItems, { color: 'var(--violet)', labelW: 78 }));
+  }
 }
 
 /* ---------------- 能量 ---------------- */
