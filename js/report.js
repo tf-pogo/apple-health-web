@@ -21,8 +21,9 @@ function mount(sel, node) {
 }
 function stat(v, label, sub) { return '<div class="stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>'; }
 function card(title, sub, body, note) { return '<div class="card"><h3>' + title + (sub ? ' <span>' + sub + '</span>' : '') + '</h3>' + body + (note ? '<p class="note">' + note + '</p>' : '') + '</div>'; }
-function table(head, rows) {
-  let h = '<div class="table-wrap"><table class="data"><thead><tr>' + head.map(x => '<th' + (x[1] ? ' class="' + x[1] + '"' : '') + '>' + x[0] + '</th>').join('') + '</tr></thead><tbody>';
+function table(head, rows, opts) {
+  const tight = opts && opts.tight ? ' tight' : '';
+  let h = '<div class="table-wrap"><table class="data' + tight + '"><thead><tr>' + head.map(x => '<th' + (x[1] ? ' class="' + x[1] + '"' : '') + '>' + x[0] + '</th>').join('') + '</tr></thead><tbody>';
   rows.forEach(r => { h += '<tr>' + r.map((c, i) => '<td' + (head[i] && head[i][1] ? ' class="' + head[i][1] + '"' : '') + '>' + c + '</td>').join('') + '</tr>'; });
   return h + '</tbody></table></div>';
 }
@@ -225,11 +226,13 @@ function mins(v) {
 }
 
 function viewOverview(r, host) {
-  const total = Object.values(r.counts).reduce((a, b) => a + b, 0);
-  const typeCount = Object.keys(r.counts).filter(k => k.indexOf('Workout:') !== 0).length;
   const days = r.days || r.hr.day.length || 1;
   const ns = r.sleep.nights;
+  const nNight = ns.length || 1;
   const sleepSum = ns.reduce((a, n) => a + n.asleep, 0);
+  const avgA = sleepSum / nNight;
+  const avgDeep = ns.reduce((a, n) => a + n.deep, 0) / nNight;
+  const avgRem = ns.reduce((a, n) => a + n.rem, 0) / nNight;
   const wkMin = r.workouts.reduce((a, w) => a + (w.dur || 0), 0);
 
   // 这一段时间的六个大数：心跳、睡眠、日光、步数、距离、能量
@@ -250,16 +253,67 @@ function viewOverview(r, host) {
       ' · 血氧 <b>' + r.spo2.avg + '%</b>' +
     '</p>';
 
-  // 记录类型 Top（按全量统计，换范围不改）
-  const types = Object.entries(r.counts)
-    .filter(([k]) => k.indexOf('Workout:') !== 0)
-    .sort((a, b) => b[1] - a[1]).slice(0, 12);
-  h += card('记录最多的数据', '全量 ' + num(total) + ' 条 / ' + typeCount + ' 种',
-    '<div id="c-types" class="chart"></div>',
-    '这是整份导出里出现频次最高的 12 类记录，不随时间范围变化。Apple Watch 每分钟的心率采样通常占掉一半以上。');
-  h += card('数据从哪来', '全量 ' + r.sources.length + ' 个来源',
-    '<div id="c-sources" class="chart"></div>',
-    '同一部 iPhone 上装过的健康类 App 都会往里写数据，所以来源往往比设备多。');
+  // 各分区一句话速览：这段范围里每个维度到底是什么样，点进去看细节
+  // 整段的中位数：最后一天可能恰好是异常值
+  const gv = (arr) => {
+    if (!arr || !arr.length) return 0;
+    const v = arr.map(x => x[1]).sort((a, b) => a - b);
+    return v[v.length >> 1];
+  };
+  const quick = [
+    ['heart', '心脏', r.hr.p50 + ' bpm',
+      num(r.hr.n) + ' 次采样 · 静息 ' + r.rhr.avg + ' · 最高 ' + r.hr.max],
+    ['sleep', '睡眠', dec(avgA) + ' 小时',
+      ns.length + ' 夜 · 深睡 ' + dec(avgDeep / avgA * 100) + '% · REM ' + dec(avgRem / avgA * 100) + '%'],
+    ['activity', '活动', num(r.steps.total / (r.steps.day.length || days)) + ' 步',
+      r.steps.day.length + ' 天 · ' + num(r.dist.total) + ' km · ' + num(r.energy.total) + ' 千卡'],
+    ['audio', '耳朵', r.hp.hours ? hm(r.hp.hours) : '—',
+      num(r.hp.n) + ' 条采样 · 平均 ' + r.hp.avg + ' dB · ' + r.hp.over85 + ' 次超 85'],
+    ['energy', '能量', (r.effort.avg || 0) + ' 负荷',
+      '静息 ' + num(r.basal.total) + ' 千卡 · 活动 ' + num(r.energy.total) + ' 千卡'],
+    ['mobility', '移动', dec(gv(r.gait.speed), 2) + ' km/h',
+      '步长 ' + dec(gv(r.gait.stepLen), 1) + ' cm · 双支撑 ' + dec(gv(r.gait.dblSup) * 100, 1) + '% · 上楼 ' + dec(gv(r.gait.asc), 2) + ' m/s'],
+  ];
+  h += card('各分区速览', '点一行进那个分区',
+    '<div class="quick-list">' + quick.map(q =>
+      '<a class="quick" data-go="' + q[0] + '">' +
+        '<span class="qname">' + q[1] + '</span>' +
+        '<b class="qval">' + esc(q[2]) + '</b>' +
+        '<span class="qsub">' + esc(q[3]) + '</span>' +
+        '<span class="qgo">→</span>' +
+      '</a>').join('') + '</div>',
+    '');
+
+  // 极值：一段范围里最极端的那几次，比平均值更能记住
+  const peak = (key) => {
+    let best = null;
+    for (const d in r.byDay) {
+      const v = r.byDay[d][key];
+      if (v > 0 && (!best || v > best.v)) best = { d: d, v: v };
+    }
+    return best;
+  };
+  const hhmm2 = (s) => { const p = s.split(':'); return +p[0] + (+p[1]) / 60; };
+  const nightBy = (fn) => ns.reduce((a, b) => (fn(b) > fn(a) ? b : a));
+  const longNight = ns.length ? nightBy(x => x.asleep) : null;
+  const realNights = ns.filter(x => x.asleep >= 3);
+  const lateNight = realNights.length ? realNights.reduce((a, b) => ((hhmm2(b.bed) + 12) % 24) > ((hhmm2(a.bed) + 12) % 24) ? b : a) : null;
+  const hiHr = peak('hrMax'), hiStep = peak('steps'), hiHp = peak('hpMax'), hiEff = peak('effMax');
+  const ex = [
+    ['心跳最快', hiHr ? hiHr.v + ' bpm' : '—', hiHr ? hiHr.d : '—'],
+    ['走的最多的一天', hiStep ? num(hiStep.v) + ' 步' : '—', hiStep ? hiStep.d : '—'],
+    ['睡得最长的一夜', longNight ? dec(longNight.asleep) + ' 小时' : '—', longNight ? longNight.d : '—'],
+    ['最晚睡下的一夜', lateNight ? lateNight.bed : '—', lateNight ? lateNight.d : '—'],
+    ['听得最响的一次', hiHp ? hiHp.v + ' dB' : '—', hiHp ? hiHp.d : '—'],
+    ['身体负荷最高', hiEff ? dec(hiEff.v, 2) : '—', hiEff ? hiEff.d : '—'],
+  ];
+  // 日期并进同一格，手机上不用横滑也能看全
+  h += card('这段时间的几个极值', '',
+    table([['项目'], ['值 与 哪天', 'num']], ex.map(x => [
+      esc(x[0]),
+      '<b>' + esc(x[1]) + '</b><br><span class="dim">' + esc(x[2]) + '</span>',
+    ]), { tight: true }),
+    '都是这段时间里真实出现过的一次，不是平均值。');
 
   // 手记的那些：条数都不多，但全是自己记的，跟手表采的不是一回事
   const SYM = {
@@ -277,18 +331,19 @@ function viewOverview(r, host) {
 
   h += card('零散但也在记的事', odd.length + ' 条手记 · 最近 ' + Math.min(16, odd.length) + ' 条',
     odd.length ? table([['时间'], ['记了什么'], ['值', 'num']], odd.slice(0, 16).map(x =>
-      [esc(x[0]), esc(x[1]), esc(x[2])])) : '<p class="note">这段时间里没有手记。</p>',
+      [esc(x[0]), esc(x[1]), esc(x[2])]), { tight: true }) : '<p class="note">这段时间里没有手记。</p>',
     '喝水、咖啡因、正念、睡眠目标和症状都是手动记的或第三方 App 写的，条数少，单独列出来免得被大数盖掉。');
 
   host.innerHTML = h;
-  mount('#c-types', C.hbarsHTML(types.map(([k, n]) => ({
-    name: labelOf(k), value: n,
-    sub: dec(n / total * 100) + '%',
-    valueText: num(n),
-  })), { color: 'var(--green)', maxItems: 10 }));
-  mount('#c-sources', C.hbarsHTML(r.sources.slice(0, 10).map(([k, n]) => ({
-    name: k, value: n, valueText: num(n),
-  })), { color: 'var(--blue)' }));
+
+  // 速览行直接切 tab，不用回顶部再点
+  host.querySelectorAll('[data-go]').forEach(el => {
+    el.addEventListener('click', ev => {
+      ev.preventDefault();
+      const b = document.querySelector('#tabs button[data-k="' + el.dataset.go + '"]');
+      if (b) b.click();
+    });
+  });
 }
 
 /* ---------------- 耳朵 ---------------- */
