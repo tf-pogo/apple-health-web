@@ -497,32 +497,33 @@ main {
 .summary-line b { color: var(--text); font-weight: 600; }
 
 /* ---------- 人格卡 ---------- */
-.persona { margin-bottom: 22px; }
+.persona { margin-bottom: 18px; }
+.p-persona-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .p-kicker {
   font-size: 12px;
   letter-spacing: .06em;
   color: var(--muted);
 }
 .p-name {
-  font-size: clamp(26px, 4vw, 34px);
+  font-size: clamp(21px, 3.2vw, 26px);
   font-weight: 760;
   letter-spacing: -.03em;
-  line-height: 1.25;
-  margin: 2px 0 6px;
+  line-height: 1.2;
+  margin: 1px 0 3px;
   color: var(--text);
 }
 .p-say {
-  margin: 0 0 18px;
-  font-size: 14px;
-  line-height: 1.75;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
   color: var(--muted);
-  max-width: 60ch;
+  max-width: 68ch;
 }
 .dims {
   display: grid;
   /* 两列并排时列间距要够大，否则右列的小标题会贴到左列的数值上，读成一行 */
-  gap: 16px 34px;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 9px 30px;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
 }
 .dim { min-width: 0; }
 .dhead {
@@ -530,14 +531,14 @@ main {
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
-.dname { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
-.dval { font-size: 13px; font-weight: 640; color: var(--text); font-variant-numeric: tabular-nums; }
+.dname { font-size: 11.5px; color: var(--muted); letter-spacing: .04em; }
+.dval { font-size: 12.5px; font-weight: 640; color: var(--text); font-variant-numeric: tabular-nums; }
 /* 中点那条线是分界：指针在左是这头，在右是那头 */
 .dtrack {
   position: relative;
-  height: 8px;
+  height: 6px;
   border-radius: var(--r-full);
   background: var(--row-bg);
 }
@@ -555,36 +556,60 @@ main {
   position: absolute;
   top: 50%;
   left: calc(6px + (100% - 12px) * var(--p, .5));
-  width: 13px;
-  height: 13px;
-  margin: -6.5px 0 0 -6.5px;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
   border-radius: 50%;
   background: var(--primary);
-  box-shadow: 0 0 0 3px var(--surface-lowest);
+  box-shadow: 0 0 0 2px var(--surface-lowest);
 }
 .dends {
   display: flex;
   justify-content: space-between;
-  margin-top: 5px;
-  font-size: 11px;
+  margin-top: 2px;
+  font-size: 10px;
   color: var(--dim);
 }
 .ptags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 18px 0 4px;
+  gap: 6px;
+  margin: 12px 0 2px;
 }
 .ptags span {
-  font-size: 12px;
-  padding: 5px 11px;
+  font-size: 11.5px;
+  padding: 3px 9px;
   border-radius: var(--r-full);
   background: var(--secondary-container);
   color: var(--on-secondary-container, var(--text));
 }
+/* ---------- 换个说法：把绝对量换算成有画面的东西 ---------- */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.fact {
+  background: var(--surface-low);
+  border-radius: var(--r-md);
+  padding: 12px 13px 11px;
+}
+.fact .fv {
+  font-size: 20px;
+  font-weight: 720;
+  letter-spacing: -.025em;
+  line-height: 1.15;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.fact .fk { font-size: 12.5px; color: var(--text); margin-top: 3px; }
+.fact .fs { font-size: 10.5px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
 @media (max-width: 720px) {
-  .p-name { font-size: 26px; }
-  .dims { grid-template-columns: minmax(0, 1fr); gap: 13px; }
+  .p-name { font-size: 22px; }
+  .dims { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fact { padding: 11px 11px 10px; }
+  .fact .fv { font-size: 18px; }
 }
 .stat {
   background: var(--surface-lowest);

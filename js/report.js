@@ -345,8 +345,7 @@ function persona(r, days) {
   const cands = [];
   const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
 
-  add('走开过的人', '中间断了 ' + num(gap.days) + ' 天没有任何记录，然后又接上了。这段时间一共 ' +
-    num(days) + ' 天有数据。', gap.days >= 180);
+  add('走开过的人', '中间断了 ' + num(gap.days) + ' 天，然后又接上了。', gap.days >= 180);
   add('静养型', num(days) + ' 天里 ' + r.workouts.length + ' 次运动' +
     (r.workouts.length ? '，平均 ' + Math.round(days / r.workouts.length) + ' 天才动一次' : '') + '。',
     wkPerWeek < 1 && days >= 14);
@@ -354,8 +353,7 @@ function persona(r, days) {
     Math.round(nightShare * 100) + '% 的心率采样。', bedShift >= 12.5 && ns.length >= 5);
   add('见光少的人', '日均 ' + Math.round(lightPerDay) + ' 分钟日光。生物钟大概靠咖啡校准。',
     lightPerDay < 20 && days >= 14);
-  add('耳机常驻的人', '有记录的 ' + r.hp.day.length + ' 天里日均 ' + hm(hpPerDay) + '，' +
-    num(r.hp.n) + ' 条音量采样。', hpPerDay >= 2);
+  add('耳机常驻的人', '有记录的 ' + r.hp.day.length + ' 天里日均 ' + hm(hpPerDay) + '。', hpPerDay >= 2);
   add('欠着觉的人', '平均 ' + dec(avgA) + ' 小时，' + nNight + ' 夜里有 ' + shallow + ' 夜不到 6 小时。',
     avgA < 6.8 && ns.length >= 5);
   add('深睡富翁', '深睡占 ' + dec(deepPct) + '%，比多数人扎实。', deepPct >= 22 && ns.length >= 5);
@@ -393,7 +391,77 @@ function persona(r, days) {
     { name: '恢复', p: clamp01((r.hrv.avg - 25) / 65), val: r.hrv.avg + ' ms', lo: '吃紧', hi: '恢复好' },
   ];
 
-  return { top: top, tags: cands.slice(1, 7), dims: dims };
+  return { top: top, tags: cands.slice(1, 6), dims: dims };
+}
+
+/** 换个说法：把绝对量换算成有画面的东西。全按当前范围算，所以切范围会变。 */
+function funFacts(r, days, sleepSum) {
+  const hrDays = r.hr.day.length || 0;
+  const beats = r.hr.avg * 1440 * hrDays;
+  const km = r.dist.total;
+  const sleepDays = sleepSum / 24;
+  const hpDays = r.hp.hours / 24;
+  const floors = r.flights.total;
+  const heightM = floors * 3;
+
+  const nights = (r.sleep.nights || []).slice().sort((a, b) => b.asleep - a.asleep);
+  const longest = nights[0];
+
+  const vo = r.vo2 || [];
+  let voHi = null, voLo = null;
+  vo.forEach(x => {
+    if (!voHi || x[1] > voHi[1]) voHi = x;
+    if (!voLo || x[1] < voLo[1]) voLo = x;
+  });
+  const voNow = vo.length ? vo[vo.length - 1] : null;
+
+  const items = [];
+  const add = (v, k, s) => { if (v) items.push({ v: v, k: k, s: s || '' }); };
+
+  if (beats > 0) {
+    add(num(beats / 1e4) + ' 万', '心脏跳了',
+      '按每日平均 ' + r.hr.avg + ' bpm 乘满 24 小时估的，' + hrDays + ' 天加起来');
+  }
+  if (km > 0) {
+    add(num(km) + ' km', '走和跑过的路',
+      km >= 1700
+        ? '够从绵竹一路走到北京，还多 ' + num(km - 1700) + ' 公里'
+        : '相当于 400 米操场 ' + num(km * 2.5) + ' 圈');
+  }
+  if (sleepDays > 0) {
+    add(num(sleepDays) + ' 天', '睡掉了',
+      num(sleepSum) + ' 小时' + (sleepDays >= 30 ? '，' + dec(sleepDays / 30) + ' 个月' : ''));
+  }
+  if (hpDays > 0) {
+    add(num(hpDays) + ' 天', '耳机戴了',
+      num(r.hp.hours) + ' 小时加起来，' + num(r.hp.n) + ' 条采样');
+  }
+  if (heightM > 0) {
+    add(num(heightM) + ' 米', '爬出来的高度',
+      num(floors) + ' 层楼 · ' + (heightM / 8848 >= 1
+        ? dec(heightM / 8848) + ' 个珠峰（一层按 3 米算）'
+        : '按一层 3 米算'));
+  }
+  if (r.hr.max > 0) {
+    add(dec(r.hr.max / 60, 1) + ' 次/秒', '心跳最快的那一下',
+      r.hr.max + ' bpm · 最慢 ' + r.hr.min + ' bpm，一秒不到一次');
+  }
+  if (longest) {
+    add(hm(longest.asleep), '最长的一夜', longest.d + ' 睡到 ' + longest.wake);
+  }
+  if (voNow) {
+    add(dec(voNow[1], 1), '心肺 VO₂max 现在',
+      vo.length > 1
+        ? '这段最高 ' + dec(voHi[1], 1) + '（' + voHi[0] + '），最低 ' + dec(voLo[1], 1) + '（' + voLo[0] + '）'
+        : voNow[0] + ' 的估算值');
+  }
+
+  if (!items.length) return '';
+  return card('换个说法', '同一个数，换个单位就有画面了',
+    '<div class="facts">' + items.map(it =>
+      '<div class="fact"><div class="fv">' + it.v + '</div>' +
+      '<div class="fk">' + it.k + '</div>' +
+      (it.s ? '<div class="fs">' + it.s + '</div>' : '') + '</div>').join('') + '</div>');
 }
 
 /** 分钟 → 人话 */
@@ -413,27 +481,9 @@ function viewOverview(r, host) {
   const avgRem = ns.reduce((a, n) => a + n.rem, 0) / nNight;
   const wkMin = r.workouts.reduce((a, w) => a + (w.dur || 0), 0);
 
-  // 这一段时间的六个大数：心跳、睡眠、日光、步数、距离、能量
-  let h = '<div class="grid six">' +
-    stat(num(r.hr.n), '次心率读数', '平均 ' + r.hr.avg + ' bpm · 最高 ' + r.hr.max) +
-    stat(num(sleepSum) + ' 小时', '累计睡眠', ns.length + ' 夜 · 平均 ' +
-      dec(ns.length ? sleepSum / ns.length : 0) + ' 小时') +
-    stat(num(r.light.total / 60) + ' 小时', '晒太阳', num(r.light.total) + ' 分钟 · 按手表的日光暴露统计') +
-    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.total / (r.steps.day.length || days))) +
-    stat(num(r.dist.total) + ' km', '走过和跑过', '步行与跑步距离') +
-    stat(num(r.energy.total), '千卡', '活动能量') +
-    '</div>' +
-    '<p class="summary-line">' +
-      '这段时间还戴了 <b>' + (r.hp.hours ? num(r.hp.hours) + ' 小时' : '—') + '</b> 耳机（' + num(r.hp.n) + ' 条音量采样）' +
-      ' · 做了 <b>' + r.workouts.length + ' 次</b>运动' +
-        (r.workouts.length ? '（' + Math.round(wkMin) + ' 分钟）' : '') +
-      ' · 静息心率 <b>' + r.rhr.avg + ' bpm</b>' +
-      ' · 血氧 <b>' + r.spo2.avg + '%</b>' +
-    '</p>';
-
-  // 人格：这段数据最像谁。放在大数之后 —— 刚看完「多少」，接着看「像谁」
+  // 人格：这段数据最像谁。放在最上面 —— 进概览第一眼先知道「这段时间的我像谁」
   const ps = persona(r, days);
-  h += '<div class="card persona">' +
+  let h = '<div class="card persona">' +
     '<div class="p-kicker">这 ' + num(days) + ' 天里，你是</div>' +
     '<div class="p-name">' + esc(ps.top.name) + '</div>' +
     '<p class="p-say">' + esc(ps.top.say) + '</p>' +
@@ -448,8 +498,28 @@ function viewOverview(r, host) {
       ? '<div class="ptags">' + ps.tags.map(t =>
         '<span title="' + esc(t.say) + '">' + esc(t.name) + '</span>').join('') + '</div>'
       : '') +
-    '<p class="note">这些标签是从上面那些数里读出来的，不是问卷。换个时间范围，结论会跟着变。</p>' +
+    '<p class="note">标签是从数据里读出来的，换范围会变。</p>' +
     '</div>';
+
+  // 这一段时间的六个大数：心跳、睡眠、日光、步数、距离、能量
+  h += '<div class="grid six">' +
+    stat(num(r.hr.n), '次心率读数', '平均 ' + r.hr.avg + ' bpm · 最高 ' + r.hr.max) +
+    stat(num(sleepSum) + ' 小时', '累计睡眠', ns.length + ' 夜 · 平均 ' +
+      dec(ns.length ? sleepSum / ns.length : 0) + ' 小时') +
+    stat(num(r.light.total / 60) + ' 小时', '晒太阳', num(r.light.total) + ' 分钟 · 按手表的日光暴露统计') +
+    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.total / (r.steps.day.length || days))) +
+    stat(num(r.dist.total) + ' km', '走过和跑过', '步行与跑步距离') +
+    stat(num(r.energy.total), '千卡', '活动能量') +
+    '</div>' +
+    '<p class="summary-line">' +
+      '这段时间还戴了 <b>' + (r.hp.hours ? num(r.hp.hours) + ' 小时' : '—') + '</b> 耳机（' + num(r.hp.n) + ' 条音量采样）' +
+      ' · 做了 <b>' + r.workouts.length + ' 次</b>运动' +
+        (r.workouts.length ? '（' + Math.round(wkMin) + ' 分钟）' : '') +
+      ' · 静息心率 <b>' + r.rhr.avg + ' bpm</b>' +
+      ' · 血氧 <b>' + r.spo2.avg + '%</b>' +
+    '</p>' +
+    // 换个说法：同一个数换个单位就有画面
+    funFacts(r, days, sleepSum);
 
   // 各分区一句话速览：这段范围里每个维度到底是什么样，点进去看细节
   // 整段的中位数：最后一天可能恰好是异常值
