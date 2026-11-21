@@ -19,6 +19,68 @@ function mount(sel, node) {
   if (typeof node === 'string') h.innerHTML = node;
   else h.appendChild(node);
 }
+/** 日期加减（UTC 天数），YYYY-MM-DD 进、YYYY-MM-DD 出 */
+function shiftDay(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 紧挨着当前范围的等长上一段，用来做「比上一段 ±%」。
+ * 超出数据起点、或者当前就是全量，就返回 null（那没有可比的对象）。
+ */
+function prevPick() {
+  if (!SRC || !RANGE || !RANGE.from || !RANGE.to) return null;
+  const len = Math.round((new Date(RANGE.to + 'T00:00:00Z') - new Date(RANGE.from + 'T00:00:00Z')) / 86400000) + 1;
+  const to2 = shiftDay(RANGE.from, -1);
+  const from2 = shiftDay(to2, -(len - 1));
+  if (SRC.firstDate && from2 < SRC.firstDate) return null;
+  try { return pick(SRC, from2, to2); } catch (e) { return null; }
+}
+
+/** 涨跌百分比，带符号；基数太小或缺失时不显示 */
+function delta(cur, prev) {
+  if (!prev || !isFinite(prev) || prev <= 0) return '';
+  const p = (cur - prev) / prev * 100;
+  if (!isFinite(p) || Math.abs(p) < 0.5) return '与上一段持平';
+  // 数卡只有一百多像素宽，写「比上一段 +9%」会顶到第二行，用箭头
+  return (p > 0 ? '↑ ' : '↓ ') + Math.abs(p).toFixed(0) + '% 较上一段';
+}
+
+const WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/** 把 [[日期, 值]] 按星期几分组求平均，周一到周日排序 */
+function byWeekday(days) {
+  const sum = new Array(7).fill(0), n = new Array(7).fill(0);
+  days.forEach(([d, v]) => {
+    const i = new Date(d + 'T00:00:00Z').getUTCDay();
+    sum[i] += v; n[i]++;
+  });
+  return [1, 2, 3, 4, 5, 6, 0].map(i => ({
+    name: WD[i],
+    value: n[i] ? +(sum[i] / n[i]).toFixed(1) : 0,
+    n: n[i],
+  }));
+}
+
+/** 一天切成六段，返回每段的采样占比与均值 */
+const PARTS = [
+  ['凌晨 0–6', 0, 6], ['早晨 6–9', 6, 9], ['上午 9–12', 9, 12],
+  ['下午 12–18', 12, 18], ['晚上 18–22', 18, 22], ['深夜 22–24', 22, 24],
+];
+function byPart(hourN, hourAvg) {
+  const total = hourN.reduce((a, b) => a + b, 0) || 1;
+  return PARTS.map(([name, a, b]) => {
+    let cnt = 0, wsum = 0;
+    for (let i = a; i < b; i++) { cnt += hourN[i] || 0; wsum += (hourN[i] || 0) * (hourAvg[i] || 0); }
+    return { name, cnt, share: cnt / total, avg: cnt ? wsum / cnt : 0 };
+  });
+}
+
+/** 把「口径 · 同比」拼成一句小字，空的自动丢掉 */
+const e1 = arr => arr.filter(Boolean).join(' · ');
+
 function stat(v, label, sub) { return '<div class="stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>'; }
 function card(title, sub, body, note) { return '<div class="card"><h3>' + title + (sub ? ' <span>' + sub + '</span>' : '') + '</h3>' + body + (note ? '<p class="note">' + note + '</p>' : '') + '</div>'; }
 function table(head, rows, opts) {
@@ -218,6 +280,122 @@ export function renderTab(k, ui) {
 
 /* ---------------- 概览 ---------------- */
 
+/** "07:27" → 7.45 */
+const clockNum = s => { const p = String(s).split(':'); return (+p[0]) + (+p[1]) / 60; };
+
+/** 单位圆上的平均向量。入睡时间跨午夜，算术平均会把 23 点和 1 点平摊成中午 */
+function clockMean(list) {
+  if (!list.length) return 0;
+  let sx = 0, sy = 0;
+  list.forEach(v => { const a = v / 24 * Math.PI * 2; sx += Math.cos(a); sy += Math.sin(a); });
+  let a = Math.atan2(sy / list.length, sx / list.length);
+  if (a < 0) a += Math.PI * 2;
+  return a / (Math.PI * 2) * 24;
+}
+
+/** 7.45 → "07:27"，分钟进位到 60 要顺到下一个小时 */
+function clockStr(v) {
+  let h = Math.floor(v) % 24, m = Math.round((v % 1) * 60);
+  if (m === 60) { m = 0; h = (h + 1) % 24; }
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** 这段范围里最长的一段空白：两个有记录的日子中间隔了多少天 */
+function longestGap(byDay) {
+  const ds = Object.keys(byDay).sort();
+  let best = 0, after = '';
+  for (let i = 1; i < ds.length; i++) {
+    const gap = (new Date(ds[i] + 'T00:00:00Z') - new Date(ds[i - 1] + 'T00:00:00Z')) / 86400000 - 1;
+    if (gap > best) { best = gap; after = ds[i]; }
+  }
+  return { days: Math.round(best), after };
+}
+
+/** 取 [[日期, 值]] 里最大的那天 */
+function peakOf(days) {
+  let best = null;
+  days.forEach(([d, v]) => { if (v > 0 && (!best || v > best.v)) best = { d: d, v: v }; });
+  return best;
+}
+
+/** 这一段时间的「人格」：不是性格测试，就是把最突出的几个事实说成人话。
+ *  按数组顺序取第一条命中的当标题，其余命中的做成小标签 —— 所以换个时间范围，标题会变。 */
+function persona(r, days) {
+  const ns = r.sleep.nights.filter(n => n.asleep >= 3);
+  const nNight = ns.length || 1;
+  const avgA = ns.reduce((a, n) => a + n.asleep, 0) / nNight;
+  const deepSum = ns.reduce((a, n) => a + n.deep, 0);
+  const sleepSum = ns.reduce((a, n) => a + n.asleep, 0) || 1;
+  const deepPct = deepSum / sleepSum * 100;
+  const shallow = ns.filter(n => n.asleep < 6).length;
+  const bedH = clockMean(ns.map(n => clockNum(n.bed)));
+  const bedShift = (bedH + 12) % 24; // 中午 12 点当 0，把 23 点和 1 点放到同一侧
+  const nightShare = (r.hr.hourN || []).slice(0, 6).reduce((a, b) => a + b, 0) /
+    ((r.hr.hourN || []).reduce((a, b) => a + b, 0) || 1);
+  const stepsPerDay = r.steps.total / (r.steps.day.length || days || 1);
+  const wkPerWeek = r.workouts.length / ((days || 1) / 7);
+  const hpPerDay = r.hp.hours / Math.max(1, r.hp.day.length || 1);
+  const lightPerDay = r.light.total / (days || 1);
+  const gap = longestGap(r.byDay);
+  const hiHr = peakOf(Object.keys(r.byDay).map(d => [d, r.byDay[d].hrMax || 0]));
+  const hiStep = peakOf(Object.keys(r.byDay).map(d => [d, r.byDay[d].steps || 0]));
+
+  const cands = [];
+  const add = (name, say, ok) => { if (ok) cands.push({ name: name, say: say }); };
+
+  add('走开过的人', '中间断了 ' + num(gap.days) + ' 天没有任何记录，然后又接上了。这段时间一共 ' +
+    num(days) + ' 天有数据。', gap.days >= 180);
+  add('静养型', num(days) + ' 天里 ' + r.workouts.length + ' 次运动' +
+    (r.workouts.length ? '，平均 ' + Math.round(days / r.workouts.length) + ' 天才动一次' : '') + '。',
+    wkPerWeek < 1 && days >= 14);
+  add('夜里的猫', '平均 ' + clockStr(bedH) + ' 才睡下，凌晨 0–6 点占了 ' +
+    Math.round(nightShare * 100) + '% 的心率采样。', bedShift >= 12.5 && ns.length >= 5);
+  add('见光少的人', '日均 ' + Math.round(lightPerDay) + ' 分钟日光。生物钟大概靠咖啡校准。',
+    lightPerDay < 20 && days >= 14);
+  add('耳机常驻的人', '有记录的 ' + r.hp.day.length + ' 天里日均 ' + hm(hpPerDay) + '，' +
+    num(r.hp.n) + ' 条音量采样。', hpPerDay >= 2);
+  add('欠着觉的人', '平均 ' + dec(avgA) + ' 小时，' + nNight + ' 夜里有 ' + shallow + ' 夜不到 6 小时。',
+    avgA < 6.8 && ns.length >= 5);
+  add('深睡富翁', '深睡占 ' + dec(deepPct) + '%，比多数人扎实。', deepPct >= 22 && ns.length >= 5);
+  add('浅眠的人', '深睡只占 ' + dec(deepPct) + '%，' + nNight + ' 夜平均睡了 ' + dec(avgA) + ' 小时。',
+    deepPct > 0 && deepPct < 15 && ns.length >= 5);
+  add('冲到过 ' + r.hr.max + ' 的人', '最高心率 ' + r.hr.max + ' bpm' + (hiHr ? '，出现在 ' + hiHr.d : '') + '。',
+    r.hr.max >= 190);
+  add('恢复得好的人', 'HRV 平均 ' + r.hrv.avg + ' ms，静息心率 ' + r.rhr.avg + ' bpm。',
+    r.hrv.avg >= 62);
+  add('恢复吃紧的人', 'HRV 平均 ' + r.hrv.avg + ' ms，静息心率 ' + r.rhr.avg + ' bpm。', r.hrv.avg > 0 && r.hrv.avg < 45);
+  add('腿不离地的人', '日均 ' + num(stepsPerDay) + ' 步' + (hiStep ? '，最多的一天 ' + num(hiStep.v) + ' 步。' : '。'),
+    stepsPerDay >= 10000);
+  add('沙发常客', '日均 ' + num(stepsPerDay) + ' 步。手表大概经常不在手上。', stepsPerDay > 0 && stepsPerDay < 5000);
+  add('耳膜刺客', num(r.hp.over90) + ' 次超过 90 dB，峰值 ' + r.hp.max + ' dB。', r.hp.over90 >= 3);
+  // 设备名是按全量统计的，跟时间范围无关，文案里要说清，别让「12 副」看起来像这一周的
+  add('耳机收藏家', '全量里有 ' + r.hp.devices.length + ' 副耳机，这段时间戴了 ' + hm(r.hp.hours) + '。',
+    r.hp.devices.length >= 8 && r.hp.hours > 0);
+
+  const top = cands[0] || {
+    name: '普通人',
+    say: '各项都在常见范围里，没有哪一项特别扎眼 —— 这本身是件好事。',
+  };
+
+  // 六根双向指针：左边是一头，右边是另一头
+  const dims = [
+    { name: '作息', p: clamp01((bedShift - 10) / 5), val: ns.length ? clockStr(bedH) + ' 睡' : '—',
+      lo: '早睡', hi: '熬夜' },
+    { name: '睡眠', p: clamp01((avgA - 4) / 5), val: ns.length ? dec(avgA) + ' 小时' : '—',
+      lo: '睡得少', hi: '睡得足' },
+    { name: '活动', p: clamp01((stepsPerDay - 2000) / 12000), val: num(stepsPerDay) + ' 步/日',
+      lo: '躺着', hi: '暴走' },
+    { name: '运动', p: clamp01(wkPerWeek / 5), val: dec(wkPerWeek, 1) + ' 次/周', lo: '静养', hi: '每周五练' },
+    { name: '听觉', p: clamp01(hpPerDay / 6), val: r.hp.hours ? dec(hpPerDay) + ' 小时/日' : '—',
+      lo: '偶尔听', hi: '耳机常驻' },
+    { name: '恢复', p: clamp01((r.hrv.avg - 25) / 65), val: r.hrv.avg + ' ms', lo: '吃紧', hi: '恢复好' },
+  ];
+
+  return { top: top, tags: cands.slice(1, 7), dims: dims };
+}
+
 /** 分钟 → 人话 */
 function mins(v) {
   if (!v) return '0 分钟';
@@ -252,6 +430,26 @@ function viewOverview(r, host) {
       ' · 静息心率 <b>' + r.rhr.avg + ' bpm</b>' +
       ' · 血氧 <b>' + r.spo2.avg + '%</b>' +
     '</p>';
+
+  // 人格：这段数据最像谁。放在大数之后 —— 刚看完「多少」，接着看「像谁」
+  const ps = persona(r, days);
+  h += '<div class="card persona">' +
+    '<div class="p-kicker">这 ' + num(days) + ' 天里，你是</div>' +
+    '<div class="p-name">' + esc(ps.top.name) + '</div>' +
+    '<p class="p-say">' + esc(ps.top.say) + '</p>' +
+    '<div class="dims">' + ps.dims.map(d =>
+      '<div class="dim">' +
+        '<div class="dhead"><span class="dname">' + d.name + '</span>' +
+          '<b class="dval">' + esc(d.val) + '</b></div>' +
+        '<div class="dtrack"><i style="--p:' + d.p.toFixed(3) + '"></i></div>' +
+        '<div class="dends"><span>' + d.lo + '</span><span>' + d.hi + '</span></div>' +
+      '</div>').join('') + '</div>' +
+    (ps.tags.length
+      ? '<div class="ptags">' + ps.tags.map(t =>
+        '<span title="' + esc(t.say) + '">' + esc(t.name) + '</span>').join('') + '</div>'
+      : '') +
+    '<p class="note">这些标签是从上面那些数里读出来的，不是问卷。换个时间范围，结论会跟着变。</p>' +
+    '</div>';
 
   // 各分区一句话速览：这段范围里每个维度到底是什么样，点进去看细节
   // 整段的中位数：最后一天可能恰好是异常值
@@ -329,7 +527,7 @@ function viewOverview(r, host) {
     .concat((r.sleepGoal || []).map(x => [x[0], '睡眠目标', x[1] + ' 小时']))
     .sort((a, b) => (a[0] < b[0] ? 1 : -1));
 
-  h += card('零散但也在记的事', odd.length + ' 条手记 · 最近 ' + Math.min(16, odd.length) + ' 条',
+  h += card('零散但也在记的事', odd.length ? odd.length + ' 条手记 · 最近 ' + Math.min(16, odd.length) + ' 条' : '',
     odd.length ? table([['时间'], ['记了什么'], ['值', 'num']], odd.slice(0, 16).map(x =>
       [esc(x[0]), esc(x[1]), esc(x[2])]), { tight: true }) : '<p class="note">这段时间里没有手记。</p>',
     '喝水、咖啡因、正念、睡眠目标和症状都是手动记的或第三方 App 写的，条数少，单独列出来免得被大数盖掉。');
@@ -390,23 +588,80 @@ function viewAudio(r, host) {
 
 function viewHeart(r, host) {
   const hr = r.hr;
+  const P = prevPick();
+
+  // 数卡：每个大数下面除了口径，再给一句同比，才知道这段是变忙还是变闲
   let h = '<div class="grid">' +
-    stat(num(hr.n), '次采样', hr.p50 + ' bpm 中位') +
-    stat(hr.avg + ' bpm', '平均', '范围 ' + hr.min + '–' + hr.max) +
+    stat(num(hr.n), '次采样', e1([hr.p50 + ' bpm 中位', P && delta(hr.n, P.hr.n)])) +
+    stat(hr.avg + ' bpm', '平均', e1(['范围 ' + hr.min + '–' + hr.max, P && delta(hr.avg, P.hr.avg)])) +
     stat(hr.p95 + ' bpm', '95 分位', '99 分位 ' + hr.p99) +
-    stat(r.rhr.avg + ' bpm', '静息心率', r.rhr.n + ' 次测量') +
-    stat(r.hrv.avg + ' ms', '心率变异性', r.hrv.n + ' 次') +
+    stat(r.rhr.avg + ' bpm', '静息心率', e1([r.rhr.n + ' 次测量', P && delta(r.rhr.avg, P.rhr.avg)])) +
+    stat(r.hrv.avg + ' ms', '心率变异性', e1([r.hrv.n + ' 次', P && delta(r.hrv.avg, P.hrv.avg)])) +
     stat(r.spo2.avg + '%', '血氧', r.spo2.n + ' 次 · 最低 ' + r.spo2.min + '%') +
     '</div>';
+
+  // 星期几与一天六段：同一批采样换个切法，能看出是「作息」还是「某天特别忙」
+  const wk = byWeekday(hr.day);
+  const pt = byPart(hr.hourN, hr.hourAvg);
+  const busiestWd = wk.slice().sort((a, b) => b.value - a.value)[0];
+  const busiestPt = pt.slice().sort((a, b) => b.share - a.share)[0];
+  const maxPt = Math.max.apply(null, pt.map(p => p.share)) || 1;
+  const wkVals = wk.filter(w => w.value).map(w => w.value);
+  const wkBase = wkVals.length ? Math.max(0, Math.min.apply(null, wkVals) - 3) : 0;
 
   h += card('一天里，心脏什么时候最忙', '按小时聚合 ' + num(hr.n) + ' 次采样',
     '<div id="c-hrclock" class="chart"></div>',
     '圆心到外缘是一整天的 24 小时，静息与活动混在一起，所以环的形状本身就是作息表。');
+  h += card('哪一天、哪一段最忙', '两个切法',
+    '<div class="subhead">按星期几 · 平均心率</div>' +
+    C.hbarsHTML(wk.map(w => ({
+      name: w.name, value: w.value, valueText: w.value ? w.value + ' bpm' : '—',
+      sub: w.n ? w.n + ' 天' : '没有记录',
+    })), { color: 'var(--blue)', labelW: 74, base: wkBase }) +
+    '<div class="subhead">按一天里的时段 · 采样占比</div>' +
+    C.hbarsHTML(pt.map(p => ({
+      name: p.name,
+      value: p.share,
+      valueText: (p.share * 100).toFixed(0) + '%',
+      sub: p.cnt ? Math.round(p.avg) + ' bpm 平均' : '没有记录',
+    })), { color: 'var(--amber)', labelW: 78 }),
+    busiestWd && busiestWd.value
+      ? busiestWd.name + '平均 ' + busiestWd.value + ' bpm 最高，' + busiestPt.name + '占了全天采样的 ' + (busiestPt.share * 100).toFixed(0) + '%。'
+      : '');
   h += card('心率分布', '每格 ' + hr.histBin + ' bpm',
     '<div id="c-hist" class="chart"></div>',
     '左边是睡着和静息，右边是运动。超过 180 的那条尾巴，几乎都来自几次冲刺。');
   h += card('每天的平均心率', hr.day.length + ' 天',
     '<div id="c-hrday" class="chart"></div>', '');
+
+  // 日历：颜色深浅按 min–max 铺，心率区间窄，用平方根会全都糊成一片
+  const dayVals = hr.day.map(d => d[1]);
+  const lo = Math.min.apply(null, dayVals.concat(999)), hi = Math.max.apply(null, dayVals.concat([0]));
+  h += card('心率日历', hr.day.length + ' 天有采样',
+    '<div id="c-hrcal"></div>',
+    '一格是一天的平均心率，颜色越深跳得越忙。空白是没有记录的日子，不是没心跳。');
+
+  // 极值：这四行是「具体哪一天」，和上面的平均不是一回事
+  const peakOf = (arr, cmp) => arr.reduce((best, x) => (!best || cmp(x, best) ? x : best), null);
+  const hiDay = peakOf(hr.day, (a, b) => a[1] > b[1]);
+  const loDay = peakOf(hr.day, (a, b) => a[1] < b[1]);
+  const rhrDay = (r.rhr.day || []).slice();
+  const rhrHi = peakOf(rhrDay, (a, b) => a[1] > b[1]);
+  const rhrLo = peakOf(rhrDay, (a, b) => a[1] < b[1]);
+  const mxRow = peakOf(Object.keys(r.byDay).map(d => [d, r.byDay[d].hrMax]), (a, b) => a[1] > b[1]);
+  const ex = [
+    ['心跳最快的一刻', mxRow ? mxRow[1] + ' bpm' : '—', mxRow ? mxRow[0] : '—'],
+    ['日均最高的一天', hiDay ? hiDay[1] + ' bpm' : '—', hiDay ? hiDay[0] : '—'],
+    ['日均最低的一天', loDay ? loDay[1] + ' bpm' : '—', loDay ? loDay[0] : '—'],
+    ['静息心率最高', rhrHi ? rhrHi[1] + ' bpm' : '—', rhrHi ? rhrHi[0] : '—'],
+    ['静息心率最低', rhrLo ? rhrLo[1] + ' bpm' : '—', rhrLo ? rhrLo[0] : '—'],
+  ];
+  h += card('这段里的几个极值', '',
+    table([['项目'], ['值 与 哪天', 'num']], ex.map(x => [
+      esc(x[0]),
+      '<b>' + esc(String(x[1])) + '</b><br><span class="dim">' + esc(String(x[2])) + '</span>',
+    ]), { tight: true }),
+    '都是这段时间里真实出现过的一天，不是平均值。');
 
   host.innerHTML = h;
   mount('#c-hrclock', C.clockRing(hr.hourAvg, {
@@ -417,6 +672,11 @@ function viewHeart(r, host) {
   }));
   mount('#c-hist', C.histogram(hr.hist, { min: hr.histMin, bin: hr.histBin, color: 'var(--red)', w: CW, h: CH(180) }));
   mount('#c-hrday', C.line(hr.day.map(d => [d[0], d[1]]), { color: 'var(--green)', w: CW, h: CH(230), pad: NARROW ? 30 : 34 }));
+  // 短短一段用一整年的格子会空成一片，30 天就按 30 天排
+  const calOpt = { cell: NARROW ? 9 : 11, gap: 2.4, color: 'var(--red)', sqrt: false, min: lo, max: hi };
+  mount('#c-hrcal', hr.day.length <= 120
+    ? C.calendar(hr.day, calOpt)
+    : C.calendarYears(hr.day, calOpt));
 }
 
 /* ---------------- 睡眠 ---------------- */
@@ -429,19 +689,9 @@ function viewSleep(r, host) {
   const avgRem = ns.reduce((a, x) => a + x.rem, 0) / n;
   const avgCore = ns.reduce((a, x) => a + x.core, 0) / n;
   const avgAwake = ns.reduce((a, x) => a + x.awake, 0) / n;
-  // 入睡时间跨午夜，直接算术平均会把 23 点和 1 点平摊成中午。
-  // 用单位圆上的平均向量（angle-mean），对跨零点分布才是无偏的
-  const hhmm = s => { const p = s.split(':'); return +p[0] + (+p[1]) / 60; };
-  const clockMean = list => {
-    let sx = 0, sy = 0;
-    list.forEach(v => { const a = v / 24 * Math.PI * 2; sx += Math.cos(a); sy += Math.sin(a); });
-    let a = Math.atan2(sy / list.length, sx / list.length);
-    if (a < 0) a += Math.PI * 2;
-    return a / (Math.PI * 2) * 24;
-  };
-  const fmtClock = v => String(Math.floor(v) % 24).padStart(2, '0') + ':' + String(Math.round((v % 1) * 60)).padStart(2, '0');
-  const bedStr = fmtClock(clockMean(ns.map(x => hhmm(x.bed))));
-  const wakeStr = fmtClock(clockMean(ns.map(x => hhmm(x.wake))));
+  // 入睡时间跨午夜，用单位圆上的平均向量（clockMean）才算得对，见文件头
+  const bedStr = clockStr(clockMean(ns.map(x => clockNum(x.bed))));
+  const wakeStr = clockStr(clockMean(ns.map(x => clockNum(x.wake))));
   void wakeStr;
 
   let h = '<div class="grid">' +
@@ -602,9 +852,25 @@ function viewEnergy(r, host) {
   h += card('每天的身体负荷', effDay.length + ' 天',
     '<div id="c-efday" class="chart"></div>',
     '每天所有采样的平均值。曲线抬起来的那几段，是开始认真跑步之后。');
-  h += card('一天的能量从哪来', '静息 vs 活动',
-    '<div class="two-col"><div id="c-esplit" class="chart"></div><div id="c-esplit-legend"></div></div>',
-    '静息能量是基础代谢，活动能量是走路、运动额外加的那部分。');
+  // 静息占了近九成，画成饼永远是一大一小；改成上面看构成、下面看一天里什么时候动
+  const days = r.days || 1;
+  const workKcal = Math.round((r.workouts || []).reduce((s, w) => s + (w.kcal || 0), 0));
+  const pctOf = v => (rest + act ? Math.round((v / (rest + act)) * 100) : 0);
+  const hourAvgE = (r.energy.hour || new Array(24).fill(0)).map(v => +(v / days).toFixed(1));
+  const peakHour = hourAvgE.indexOf(Math.max.apply(null, hourAvgE));
+  h += card('一天的能量从哪来', '静息 ' + pctOf(rest) + '% · 活动 ' + pctOf(act) + '%',
+    '<div class="splitbar">' +
+      '<i style="width:' + pctOf(rest) + '%;background:var(--blue)"></i>' +
+      '<i style="flex:1;background:var(--amber)"></i>' +
+    '</div>' +
+    '<div class="splitcap">' +
+      '<span><i style="background:var(--blue)"></i>静息 ' + num(rest) + ' 千卡</span>' +
+      '<span><i style="background:var(--amber)"></i>活动 ' + num(act) + ' 千卡</span>' +
+    '</div>' +
+    '<div id="c-enhour" class="chart"></div>',
+    '上面是总账，下面是活动能量摊到一天 24 小时的样子（平均每天这个钟点烧掉多少千卡）。' +
+    (act && workKcal ? '活动里只有 ' + num(workKcal) + ' 千卡来自正式运动（' + Math.round(workKcal / act * 100) + '%），其余全是日常走动和零碎动作。' : '') +
+    (hourAvgE[peakHour] ? '最烧能量的钟点是 ' + peakHour + ' 点前后。' : ''));
   h += card('每月爬了多少层楼', '按日汇总到月',
     '<div id="c-flights" class="chart"></div>', '');
   h += card('站立小时', num(standTot) + ' 个小时的判定',
@@ -622,23 +888,10 @@ function viewEnergy(r, host) {
     },
   }));
   mount('#c-efday', C.line(effDay, { color: 'var(--amber)', w: CW, h: CH(230), pad: NARROW ? 30 : 34, minPad: 0.3 }));
-  mount('#c-esplit', C.donut([
-    { name: '静息', value: rest, color: 'var(--blue)' },
-    { name: '活动', value: act, color: 'var(--amber)' },
-  ], { size: 210 }));
-  mount('#c-esplit-legend', (() => {
-    const d = document.createElement('div');
-    d.className = 'legend';
-    d.style.flexDirection = 'column';
-    [['静息 ' + num(rest) + ' 千卡', 'var(--blue)'], ['活动 ' + num(act) + ' 千卡', 'var(--amber)']]
-      .forEach(([t, c]) => {
-        const s = document.createElement('span');
-        s.innerHTML = '<i style="background:' + c + '"></i>' + t;
-        d.appendChild(s);
-      });
-    return d;
-  })());
-
+  mount('#c-enhour', C.bars(hourAvgE, {
+    w: CW, h: CH(190), color: 'var(--amber)', pad: NARROW ? 26 : 30,
+    labelFmt: hh => hh + '时',
+  }));
   // 楼层：没直接存日明细的求和，用 byDay 里的 flights 现算
   const fl = Object.keys(r.byDay).sort()
     .filter(d => r.byDay[d].flights)

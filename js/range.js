@@ -64,9 +64,11 @@ export function pick(r, from, to) {
   let hrN = 0, hrSum = 0, hrMin = Infinity, hrMax = 0;
   let hpN = 0, hpSum = 0, hpMax = 0, hpDur = 0, o80 = 0, o85 = 0, o90 = 0;
   let steps = 0, dist = 0, energy = 0, light = 0, stand = 0, exer = 0;
+  const energyHour = new Array(24).fill(0);
   let spo2N = 0, spo2Sum = 0, spo2Min = 100, spo2Max = 0, spo2Low = 0;
   let respN = 0, respSum = 0;
   let rhrN = 0, rhrSum = 0, rhrLast = null;
+  const rhrDay = [];
   let hrvN = 0, hrvSum = 0;
 
   for (const d of sel) {
@@ -90,7 +92,10 @@ export function pick(r, from, to) {
     }
     if (o.steps) { steps += o.steps; stepDay.push([d, o.steps]); }
     if (o.dist) dist += o.dist;
-    if (o.energy) { energy += o.energy; energyDay.push([d, o.energy]); }
+    if (o.energy) {
+      energy += o.energy; energyDay.push([d, o.energy]);
+      for (let i = 0; i < 24; i++) energyHour[i] += o.energyH[i];
+    }
     light += o.light; stand += o.stand; exer += o.exer;
     if (o.spo2N) {
       spo2N += o.spo2N; spo2Sum += o.spo2S;
@@ -99,7 +104,7 @@ export function pick(r, from, to) {
       spo2Low += o.spo2Low;
     }
     if (o.respN) { respN += o.respN; respSum += o.respS; }
-    if (o.rhr) { rhrN++; rhrSum += o.rhr; rhrLast = [d, o.rhr]; }
+    if (o.rhr) { rhrN++; rhrSum += o.rhr; rhrLast = [d, o.rhr]; rhrDay.push([d, o.rhr]); }
     if (o.hrv) { hrvN++; hrvSum += o.hrv; }
 
     if (o.effN) {
@@ -195,7 +200,7 @@ export function pick(r, from, to) {
       histBin: r.hr.histBin,
       day: hrDay,
     },
-    rhr: { n: rhrN, avg: +(rhrSum / rhrN || 0).toFixed(1), last: rhrLast },
+    rhr: { n: rhrN, avg: +(rhrSum / rhrN || 0).toFixed(1), last: rhrLast, day: rhrDay },
     hrv: { n: hrvN, avg: +(hrvSum / hrvN || 0).toFixed(1) },
     spo2: { n: spo2N, avg: +(spo2Sum / spo2N || 0).toFixed(1), min: spo2N ? spo2Min : 0, max: spo2Max, low: spo2Low },
     resp: { n: respN, avg: +(respSum / respN || 0).toFixed(1) },
@@ -214,7 +219,7 @@ export function pick(r, from, to) {
     env: r.env,
     steps: { n: stepDay.length, total: Math.round(steps), day: stepDay },
     dist: { total: +dist.toFixed(1) },
-    energy: { total: Math.round(energy), day: energyDay },
+    energy: { total: Math.round(energy), day: energyDay, hour: energyHour.map(Math.round) },
     sleep: { segs: r.sleep.segs, nights },
     workouts,
     actsum,
@@ -239,7 +244,8 @@ export function pick(r, from, to) {
     },
     breath, wrist, afib, hrrec,
     events, symptoms, life, sleepGoal,
-    byDay,
+    // 只带范围内的天：概览的极值、每月的爬楼层数都直接读这个
+    byDay: sel.reduce((o, d) => { o[d] = byDay[d]; return o; }, Object.create(null)),
   };
 }
 

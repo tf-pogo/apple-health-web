@@ -80,8 +80,9 @@ export function bars(values, opts) {
   });
   el('line', { x1: o.pad, y1: o.h - o.pad, x2: o.w - o.pad, y2: o.h - o.pad, stroke: 'var(--axis)' }, s);
   if (o.labels) {
+    const lf = o.labelFmt || (i => String(i));
     [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor(n * 3 / 4), n - 1].forEach(i => {
-      el('text', { x: o.pad + i * bw + bw / 2, y: o.h - 8, 'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': 11 }, s, String(i));
+      el('text', { x: o.pad + i * bw + bw / 2, y: o.h - 8, 'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': 11 }, s, lf(i));
     });
   }
   return s;
@@ -146,12 +147,14 @@ export function hbars(items, opts) {
  * 12.5px 的字会变成 4.7px；这版直接排成 div，字是真字号，窄屏能自己换行。
  */
 export function hbarsHTML(items, opts) {
-  const o = Object.assign({ maxItems: 10, color: 'var(--blue)', labelW: 150 }, opts || {});
+  // base：窄区间的数据（比如各星期平均心率都在 79–88）从 0 起画会全是一样长，得从 min 起
+  const o = Object.assign({ maxItems: 10, color: 'var(--blue)', labelW: 150, base: 0 }, opts || {});
   const list = items.slice(0, o.maxItems);
   const max = Math.max.apply(null, list.map(i => i.value)) || 1;
+  const lo = o.base || 0;
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   return '<div class="hbars" style="--lab:' + o.labelW + 'px">' + list.map(it => {
-    const w = Math.max(2, (it.value / max) * 100).toFixed(1);
+    const w = Math.max(2, ((it.value - lo) / ((max - lo) || 1)) * 100).toFixed(1);
     return '<div class="hrow">' +
         '<b class="hname" title="' + esc(it.name) + '">' + esc(it.name) + '</b>' +
         '<div class="hbar"><i style="width:' + w + '%;background:' + o.color + '"></i></div>' +
@@ -197,13 +200,18 @@ export function calendar(days, opts) {
   const end = new Date((o.fixedYear || sorted[sorted.length - 1]) + (o.fixedYear ? '-12-31' : '') + 'T00:00:00Z');
   const cols = Math.ceil(((end - start) / 86400000 + 1) / 7) + 1;
   const s = svg(cols * (o.cell + o.gap), 7 * (o.cell + o.gap));
-  const max = o.max || Math.max.apply(null, days.map(d => d[1])) || 1;
+  // 步数这种从 0 起的量用平方根压，低值才看得见；心率区间窄，得按 min–max 线性铺开
+  const hi = o.max || Math.max.apply(null, days.map(d => d[1])) || 1;
+  const lo = o.min || 0;
+  const norm = v => o.sqrt === false
+    ? Math.max(0, Math.min(1, (v - lo) / ((hi - lo) || 1)))
+    : Math.min(1, Math.sqrt(v / hi));
   let d = new Date(start);
   let col = 0, row = start.getUTCDay();
   while (d <= end) {
     const key = d.toISOString().slice(0, 10);
     const v = map.get(key) || 0;
-    const t = v ? Math.min(1, Math.sqrt(v / max)) : 0;
+    const t = v ? norm(v) : 0;
     el('rect', {
       x: col * (o.cell + o.gap), y: row * (o.cell + o.gap),
       width: o.cell, height: o.cell, rx: 2,

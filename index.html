@@ -34,10 +34,12 @@
     </p>
 
     <div id="drop" class="drop" tabindex="0" role="button" aria-label="选择或拖入压缩包">
-      <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
-        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
-              fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+      <span class="drop-icon">
+        <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+          <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
       <strong>选一个 导出.zip</strong>
       <span>点按选择，或者把它拖进来</span>
       <input id="file" type="file" accept=".zip,application/zip" hidden>

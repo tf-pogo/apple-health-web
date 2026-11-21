@@ -132,6 +132,7 @@ function drec(a, day) {
       hpN: 0, hpS: 0, hpMax: 0, hpDur: 0, hpO80: 0, hpO85: 0, hpO90: 0,
       hpH: new Array(48).fill(0),
       steps: 0, dist: 0, energy: 0, light: 0, stand: 0, exer: 0,
+      energyH: new Array(24).fill(0),
       spo2N: 0, spo2S: 0, spo2Min: 100, spo2Low: 0,
       respN: 0, respS: 0,
       rhrSum: 0, rhrN: 0, hrvSum: 0, hrvN: 0,
@@ -321,10 +322,13 @@ export function feedLine(a, line) {
       case ENERGY: {
         const v = +attr(tag, 'value');
         if (!isFinite(v)) return;
-        const day = attr(tag, 'startDate').slice(0, 10);
+        const st = attr(tag, 'startDate');
+        const day = st.slice(0, 10);
         a.energy.total += v;
         addTo(a.energy.day, day, v);
-        drec(a, day).energy += v;
+        const de = drec(a, day);
+        de.energy += v;
+        de.energyH[+st.slice(11, 13)] += v;
         break;
       }
       case SLEEP: {
@@ -616,6 +620,12 @@ export function feedLine(a, line) {
 export function finalize(a) {
   const hourAvg = a.hr.hourSum.map((s, i) => (a.hr.hourN[i] ? +(s / a.hr.hourN[i]).toFixed(1) : 0));
 
+  // 活动的每小时分布：静息那边不用，它平得像一条直线
+  const energyHour = new Array(24).fill(0);
+  for (const d of a.byDay.values()) {
+    for (let i = 0; i < 24; i++) energyHour[i] += d.energyH[i];
+  }
+
   const hrDay = [...a.hr.day.entries()]
     .map(([d, o]) => [d, Math.round(o.s / o.n)])
     .sort((x, y) => (x[0] < y[0] ? -1 : 1));
@@ -670,8 +680,8 @@ export function finalize(a) {
     byDay[d] = {
       hrN: o.hrN,
       hrS: Math.round(o.hrS),
-      hrMin: o.hrMin === Infinity ? 0 : o.hrMin,
-      hrMax: o.hrMax,
+      hrMin: o.hrMin === Infinity ? 0 : Math.round(o.hrMin),
+      hrMax: Math.round(o.hrMax),
       hrH: o.hrH.map(Math.round),
       hrB: o.hrHist,
       hpN: o.hpN,
@@ -683,6 +693,7 @@ export function finalize(a) {
       steps: Math.round(o.steps),
       dist: +o.dist.toFixed(3),
       energy: Math.round(o.energy),
+      energyH: o.energyH.map(Math.round),
       light: Math.round(o.light),
       stand: Math.round(o.stand),
       exer: Math.round(o.exer),
@@ -769,6 +780,7 @@ export function finalize(a) {
       n: a.rhr.n,
       avg: +(a.rhr.sum / a.rhr.n || 0).toFixed(1),
       last: a.rhr.day.size ? [...a.rhr.day.entries()].sort((x, y) => (x[0] < y[0] ? 1 : -1))[0] : null,
+      day: [...a.rhr.day.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)),
     },
     hrv: { n: a.hrv.n, avg: +(a.hrv.sum / a.hrv.n || 0).toFixed(1) },
     spo2: {
@@ -796,7 +808,7 @@ export function finalize(a) {
     env: { n: a.env.n, avg: +(a.env.sum / a.env.n || 0).toFixed(1), max: +a.env.max.toFixed(1) },
     steps: { n: a.steps.n, total: Math.round(a.steps.total), day: stepDay },
     dist: { total: +a.dist.total.toFixed(1) },
-    energy: { total: Math.round(a.energy.total), day: energyDay },
+    energy: { total: Math.round(a.energy.total), day: energyDay, hour: energyHour },
     sleep: { segs: a.sleep.segs, nights },
     workouts,
     actsum: a.actsum.sort((x, y) => (x.d < y.d ? -1 : 1)),
