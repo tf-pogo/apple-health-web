@@ -1,4 +1,5 @@
 import { renderReport } from './report.js';
+import { initTheme } from './theme.js';
 
 const $ = s => document.querySelector(s);
 const nf = new Intl.NumberFormat('zh-CN');
@@ -9,6 +10,8 @@ function bytes(b) {
   if (b > 1048576) return (b / 1048576).toFixed(1) + ' MB';
   return Math.round(b / 1024) + ' KB';
 }
+
+initTheme(document.getElementById('theme'));
 
 let worker = null;
 let result = null;

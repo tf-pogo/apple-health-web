@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>预览 · 健康档案</title>
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="css/style.css">
 <style>
   /* 只属于开发预览页的那一条 */
@@ -13,25 +13,25 @@
     position: fixed; inset: 0 0 auto 0; height: 30px; z-index: 99;
     display: flex; align-items: center; gap: 10px; padding: 0 12px;
     font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: #9aa4b2; background: #0b0d10; border-bottom: 1px solid #1b1f27;
+    color: var(--muted); background: var(--card); border-bottom: 1px solid var(--line);
   }
-  #devbar b { color: #4ade80; font-weight: 600; letter-spacing: .06em; }
-  #devbar .sep { color: #2b3240; }
+  #devbar b { color: var(--green); font-weight: 600; letter-spacing: .06em; }
+  #devbar .sep { color: var(--line); }
   #devbar .dot {
-    width: 7px; height: 7px; border-radius: 50%; background: #4ade80;
-    box-shadow: 0 0 8px #4ade8088;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--glow-1);
   }
-  #devbar .dot.off { background: #6b7280; box-shadow: none; }
+  #devbar .dot.off { background: var(--dim); box-shadow: none; }
   #devbar .sp { flex: 1; }
-  #devbar a { color: #5b9cff; text-decoration: none; }
+  #devbar a { color: var(--blue); text-decoration: none; }
   #devbar button {
-    font: inherit; color: #9aa4b2; background: #151a21; border: 1px solid #232a35;
+    font: inherit; color: var(--muted); background: var(--btn-bg); border: 1px solid var(--btn-line);
     border-radius: 5px; padding: 2px 8px; cursor: pointer;
   }
-  #devbar button:hover { color: #e6edf3; border-color: #334155; }
+  #devbar button:hover { color: var(--text); border-color: var(--dim); }
   #devmsg {
     max-width: 980px; margin: 60px auto; padding: 24px;
-    border: 1px solid #232a35; border-radius: 12px; color: #cbd5e1;
+    border: 1px solid var(--line); border-radius: 12px; color: var(--text);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
     white-space: pre-wrap; line-height: 1.7;
   }
@@ -48,6 +48,10 @@
   <span id="dbstat">加载中…</span>
   <span class="sp"></span>
   <span id="dbtime"></span>
+  <button id="theme" class="theme-toggle mini" type="button" aria-label="切换深浅色">
+    <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 14.6A8.4 8.4 0 0 1 9.4 3.6a8.4 8.4 0 1 0 11 11Z"/></svg>
+    <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.4 12H2.2M21.8 12h-2.2M6.6 6.6 5 5M19 19l-1.6-1.6M6.6 17.4 5 19M19 5l-1.6 1.6"/></svg>
+  </button>
   <button id="dbcopy" type="button" title="复制页面地址">复制地址</button>
   <a href="./" target="_blank" rel="noopener">正式页</a>
 </div>
@@ -70,6 +74,9 @@
 
 <script type="module">
 import { renderReport, renderTab } from './js/report.js';
+import { initTheme } from './js/theme.js';
+
+initTheme(document.getElementById('theme'));
 
 const $ = id => document.getElementById(id);
 const KEYS = ['overview', 'audio', 'heart', 'sleep', 'activity', 'devices'];

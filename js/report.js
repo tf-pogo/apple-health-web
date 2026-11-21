@@ -251,10 +251,10 @@ function viewOverview(r, host) {
     name: labelOf(k), value: n,
     sub: dec(n / total * 100) + '%',
     valueText: num(n),
-  })), { color: '#4ade80', maxItems: 10 }));
+  })), { color: 'var(--green)', maxItems: 10 }));
   mount('#c-sources', C.hbars(r.sources.slice(0, 10).map(([k, n]) => ({
     name: k, value: n, valueText: num(n),
-  })), { color: '#5b9cff' }));
+  })), { color: 'var(--blue)' }));
 }
 
 /* ---------------- 耳朵 ---------------- */
@@ -283,18 +283,18 @@ function viewAudio(r, host) {
     name: d.name, value: d.hours || d.n,
     sub: num(d.n) + ' 次采样 · 均值 ' + d.avg + ' dB · 峰值 ' + d.max,
     valueText: d.hours ? (d.hours >= 10 ? Math.round(d.hours) : d.hours.toFixed(1)) + ' h' : '—',
-  })), { color: '#fbbf24', labelW: 190, maxItems: 12 }));
+  })), { color: 'var(--amber)', labelW: 190, maxItems: 12 }));
   mount('#c-clock', C.clockRing(hp.hourAvg, {
     size: 400, min: 40, max: Math.max(70, hp.max),
     centerValue: hp.avg,
     centerLabel: '平均 dB',
     color: (v, lo, hi) => {
       const t = (v - lo) / (hi - lo || 1);
-      return t > 0.8 ? '#ff6b6b' : t > 0.55 ? '#fbbf24' : '#5b9cff';
+      return t > 0.8 ? 'var(--red)' : t > 0.55 ? 'var(--amber)' : 'var(--blue)';
     },
   }));
   const recent = hp.day.slice(-120);
-  mount('#c-day', C.bars(recent.map(d => d[1]), { w: 900, h: 170, color: '#fbbf24', labels: false }));
+  mount('#c-day', C.bars(recent.map(d => d[1]), { w: 900, h: 170, color: 'var(--amber)', labels: false }));
 }
 
 /* ---------------- 心脏 ---------------- */
@@ -324,10 +324,10 @@ function viewHeart(r, host) {
     size: 400, min: 50, max: Math.max(120, Math.max.apply(null, hr.hourAvg)),
     centerValue: hr.p50,
     centerLabel: '中位心率',
-    color: (v) => v >= 100 ? '#ff6b6b' : v >= 85 ? '#fbbf24' : '#5b9cff',
+    color: (v) => v >= 100 ? 'var(--red)' : v >= 85 ? 'var(--amber)' : 'var(--blue)',
   }));
-  mount('#c-hist', C.histogram(hr.hist, { min: hr.histMin, bin: hr.histBin, color: '#ff6b6b' }));
-  mount('#c-hrday', C.line(hr.day.map(d => [d[0], d[1]]), { color: '#4ade80', w: 900, h: 230 }));
+  mount('#c-hist', C.histogram(hr.hist, { min: hr.histMin, bin: hr.histBin, color: 'var(--red)' }));
+  mount('#c-hrday', C.line(hr.day.map(d => [d[0], d[1]]), { color: 'var(--green)', w: 900, h: 230 }));
 }
 
 /* ---------------- 睡眠 ---------------- */
@@ -373,18 +373,18 @@ function viewSleep(r, host) {
 
   host.innerHTML = h;
   mount('#c-bands', C.sleepBands(ns, { w: 900, h: 280 }));
-  mount('#c-len', C.bars(ns.slice(-90).map(x => x.asleep), { w: 900, h: 170, color: '#5b9cff', labels: false }));
+  mount('#c-len', C.bars(ns.slice(-90).map(x => x.asleep), { w: 900, h: 170, color: 'var(--blue)', labels: false }));
   mount('#c-donut', C.donut([
-    { name: '深睡', value: avgDeep, color: '#4ade80' },
-    { name: '核心', value: avgCore, color: '#5b9cff' },
-    { name: 'REM', value: avgRem, color: '#a78bfa' },
-    { name: '清醒', value: avgAwake, color: '#ff6b6b' },
+    { name: '深睡', value: avgDeep, color: 'var(--green)' },
+    { name: '核心', value: avgCore, color: 'var(--blue)' },
+    { name: 'REM', value: avgRem, color: 'var(--violet)' },
+    { name: '清醒', value: avgAwake, color: 'var(--red)' },
   ], { size: 230 }));
   mount('#c-donut-legend', (() => {
     const d = document.createElement('div');
     d.className = 'legend';
     d.style.flexDirection = 'column';
-    [['深睡', '#4ade80', avgDeep], ['核心', '#5b9cff', avgCore], ['REM', '#a78bfa', avgRem], ['清醒', '#ff6b6b', avgAwake]]
+    [['深睡', 'var(--green)', avgDeep], ['核心', 'var(--blue)', avgCore], ['REM', 'var(--violet)', avgRem], ['清醒', 'var(--red)', avgAwake]]
       .forEach(x => {
         const s = document.createElement('span');
         s.innerHTML = '<i style="background:' + x[1] + '"></i>' + x[0] + ' · ' + dec(x[2], 2) + ' h';
@@ -425,8 +425,8 @@ function viewActivity(r, host) {
      w.avgHr ? Math.round(w.avgHr) : '—']);
 
   host.innerHTML = h;
-  mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4, color: '74,222,128' }));
-  mount('#c-wk', C.hbars(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: '#5b9cff', labelW: 150 }));
+  mount('#c-cal', C.calendarYears(sd, { cell: 12, gap: 2.4 }));
+  mount('#c-wk', C.hbars(wk.map(([k, v]) => ({ name: labelOf('Workout:' + k), value: v, valueText: v + ' 次' })), { color: 'var(--blue)', labelW: 150 }));
   host.insertAdjacentHTML('beforeend', card('最近的运动',
     '最后 14 次',
     table([['时间'], ['类型'], ['时长', 'num'], ['距离', 'num'], ['千卡', 'num'], ['均心率', 'num']], rows)));
@@ -459,7 +459,7 @@ function viewDevices(r, host) {
     '这些是「健康」App 里填过的基础信息，没填就是 NotSet。');
 
   host.innerHTML = h;
-  mount('#c-src', C.hbars(r.sources.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: '#a78bfa', maxItems: 12 }));
-  mount('#c-dev2', C.hbars(r.devices.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: '#22d3ee', maxItems: 12 }));
+  mount('#c-src', C.hbars(r.sources.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--violet)', maxItems: 12 }));
+  mount('#c-dev2', C.hbars(r.devices.map(([k, n]) => ({ name: k, value: n, valueText: num(n) })), { color: 'var(--cyan)', maxItems: 12 }));
 }
 

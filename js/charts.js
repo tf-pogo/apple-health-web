@@ -13,7 +13,12 @@ export function svg(w, h) {
 
 function el(tag, attrs, parent, text) {
   const e = document.createElementNS(NS, tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  for (const k in attrs) {
+    const v = attrs[k];
+    // fill="var(--x)" 这种作为 SVG 属性不生效，得写进 style；这样切主题时颜色会自己跟着变
+    if (typeof v === 'string' && v.indexOf('var(') >= 0) e.style.setProperty(k, v);
+    else e.setAttribute(k, v);
+  }
   if (text != null) e.textContent = text;
   if (parent) parent.appendChild(e);
   return e;
@@ -35,7 +40,7 @@ export function clockRing(values, opts) {
     const r = r0 + Math.max(0.02, Math.min(1, (v - lo) / (hi - lo || 1))) * (r1 - r0);
     const p = (a, rr) => [c + Math.cos(a) * rr, c + Math.sin(a) * rr];
     const [x0, y0] = p(a0, r0), [x1, y1] = p(a0, r), [x2, y2] = p(a1, r), [x3, y3] = p(a1, r0);
-    const fill = o.color ? o.color(v, lo, hi) : '#4ade80';
+    const fill = o.color ? o.color(v, lo, hi) : 'var(--green)';
     el('path', {
       d: 'M' + x0 + ' ' + y0 + ' L' + x1 + ' ' + y1 +
          ' A' + r + ' ' + r + ' 0 0 1 ' + x2 + ' ' + y2 +
@@ -43,15 +48,15 @@ export function clockRing(values, opts) {
       fill, opacity: 0.88,
     }, s);
   }
-  el('circle', { cx: c, cy: c, r: r0 - 1, fill: 'none', stroke: '#1e2532' }, s);
-  if (o.centerValue) el('text', { x: c, y: c - 4, 'text-anchor': 'middle', fill: '#e8edf6', 'font-size': o.size * 0.085, 'font-weight': 800 }, s, o.centerValue);
-  if (o.centerLabel) el('text', { x: c, y: c + o.size * 0.055, 'text-anchor': 'middle', fill: '#7b8798', 'font-size': o.size * 0.032 }, s, o.centerLabel);
+  el('circle', { cx: c, cy: c, r: r0 - 1, fill: 'none', stroke: 'var(--axis)' }, s);
+  if (o.centerValue) el('text', { x: c, y: c - 4, 'text-anchor': 'middle', fill: 'var(--strong)', 'font-size': o.size * 0.085, 'font-weight': 800 }, s, o.centerValue);
+  if (o.centerLabel) el('text', { x: c, y: c + o.size * 0.055, 'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': o.size * 0.032 }, s, o.centerLabel);
   for (let h = 0; h < 24; h += 3) {
     const a = (h / 24) * Math.PI * 2 - Math.PI / 2;
     el('text', {
       x: c + Math.cos(a) * (r1 + o.size * 0.055),
       y: c + Math.sin(a) * (r1 + o.size * 0.055) + 4,
-      'text-anchor': 'middle', fill: '#7b8798', 'font-size': o.size * 0.03,
+      'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': o.size * 0.03,
     }, s, h + '时');
   }
   return s;
@@ -59,7 +64,7 @@ export function clockRing(values, opts) {
 
 /** 竖直柱状图 */
 export function bars(values, opts) {
-  const o = Object.assign({ w: 900, h: 180, color: '#fbbf24', pad: 28, labels: true }, opts || {});
+  const o = Object.assign({ w: 900, h: 180, color: 'var(--amber)', pad: 28, labels: true }, opts || {});
   const s = svg(o.w, o.h);
   const n = values.length;
   const bw = (o.w - o.pad * 2) / n;
@@ -73,10 +78,10 @@ export function bars(values, opts) {
       rx: 2, opacity: 0.9,
     }, s);
   });
-  el('line', { x1: o.pad, y1: o.h - o.pad, x2: o.w - o.pad, y2: o.h - o.pad, stroke: '#1e2532' }, s);
+  el('line', { x1: o.pad, y1: o.h - o.pad, x2: o.w - o.pad, y2: o.h - o.pad, stroke: 'var(--axis)' }, s);
   if (o.labels) {
     [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor(n * 3 / 4), n - 1].forEach(i => {
-      el('text', { x: o.pad + i * bw + bw / 2, y: o.h - 8, 'text-anchor': 'middle', fill: '#7b8798', 'font-size': 11 }, s, String(i));
+      el('text', { x: o.pad + i * bw + bw / 2, y: o.h - 8, 'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': 11 }, s, String(i));
     });
   }
   return s;
@@ -84,7 +89,7 @@ export function bars(values, opts) {
 
 /** 折线图，points = [[label, value], ...] */
 export function line(points, opts) {
-  const o = Object.assign({ w: 900, h: 220, color: '#4ade80', pad: 34, fill: true, minPad: 2 }, opts || {});
+  const o = Object.assign({ w: 900, h: 220, color: 'var(--green)', pad: 34, fill: true, minPad: 2 }, opts || {});
   const s = svg(o.w, o.h);
   if (!points.length) return s;
   const ys = points.map(p => p[1]);
@@ -94,8 +99,8 @@ export function line(points, opts) {
   const Y = v => o.h - o.pad - ((v - lo) / (hi - lo || 1)) * (o.h - o.pad * 2);
   for (let g = 0; g < 4; g++) {
     const v = lo + (hi - lo) * g / 3;
-    el('line', { x1: o.pad, y1: Y(v), x2: o.w - o.pad, y2: Y(v), stroke: '#1e2532' }, s);
-    el('text', { x: o.pad - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: '#7b8798', 'font-size': 10 }, s, Math.round(v));
+    el('line', { x1: o.pad, y1: Y(v), x2: o.w - o.pad, y2: Y(v), stroke: 'var(--axis)' }, s);
+    el('text', { x: o.pad - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, Math.round(v));
   }
   let d = '';
   points.forEach((p, i) => { d += (i ? ' L' : 'M') + X(i) + ' ' + Y(p[1]); });
@@ -104,14 +109,14 @@ export function line(points, opts) {
   }
   el('path', { d, fill: 'none', stroke: o.color, 'stroke-width': 2, 'stroke-linejoin': 'round' }, s);
   const first = points[0][0], last = points[points.length - 1][0];
-  el('text', { x: o.pad, y: o.h - 8, fill: '#7b8798', 'font-size': 10 }, s, first);
-  el('text', { x: o.w - o.pad, y: o.h - 8, 'text-anchor': 'end', fill: '#7b8798', 'font-size': 10 }, s, last);
+  el('text', { x: o.pad, y: o.h - 8, fill: 'var(--axis-text)', 'font-size': 10 }, s, first);
+  el('text', { x: o.w - o.pad, y: o.h - 8, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, last);
   return s;
 }
 
 /** 横向条形：items = [{name, value, sub}] */
 export function hbars(items, opts) {
-  const o = Object.assign({ w: 900, rowH: 38, color: '#5b9cff', maxItems: 10, labelW: 190 }, opts || {});
+  const o = Object.assign({ w: 900, rowH: 38, color: 'var(--blue)', maxItems: 10, labelW: 190 }, opts || {});
   const list = items.slice(0, o.maxItems);
   const h = list.length * o.rowH + 10;
   const s = svg(o.w, h);
@@ -119,15 +124,15 @@ export function hbars(items, opts) {
   const barW = o.w - o.labelW - 78;
   list.forEach((it, i) => {
     const y = 5 + i * o.rowH;
-    el('rect', { x: 0, y, width: o.w, height: o.rowH - 6, rx: 6, fill: '#0e121a' }, s);
+    el('rect', { x: 0, y, width: o.w, height: o.rowH - 6, rx: 6, fill: 'var(--row-bg)' }, s);
     const bw = Math.max(2, (it.value / max) * barW);
     el('rect', { x: o.labelW, y: y + 7, width: bw, height: o.rowH - 20, rx: 4, fill: o.color, opacity: 0.75 }, s);
     const nm = it.name.length > 20 ? it.name.slice(0, 19) + '…' : it.name;
-    el('text', { x: 10, y: it.sub ? y + 16 : y + 23, fill: '#c9d5e6', 'font-size': 12.5 }, s, nm);
-    if (it.sub) el('text', { x: 10, y: y + 29, fill: '#5c6b80', 'font-size': 10.5 }, s, it.sub);
+    el('text', { x: 10, y: it.sub ? y + 16 : y + 23, fill: 'var(--row-text)', 'font-size': 12.5 }, s, nm);
+    if (it.sub) el('text', { x: 10, y: y + 29, fill: 'var(--row-sub)', 'font-size': 10.5 }, s, it.sub);
     el('text', {
       x: o.labelW + barW + 8, y: it.sub ? y + 24 : y + 24,
-      fill: '#8996a8', 'font-size': 11, 'text-anchor': 'start',
+      fill: 'var(--value-text)', 'font-size': 11, 'text-anchor': 'start',
     }, s, it.valueText != null ? String(it.valueText) : String(it.value));
   });
   return s;
@@ -161,7 +166,7 @@ export function donut(parts, opts) {
 
 /** 日历热力图：days = [['YYYY-MM-DD', value], ...] */
 export function calendar(days, opts) {
-  const o = Object.assign({ cell: 11, gap: 2.6, color: '74,222,128', min: 0, max: 0 }, opts || {});
+  const o = Object.assign({ cell: 11, gap: 2.6, color: 'var(--tile)', min: 0, max: 0 }, opts || {});
   const map = new Map(days);
   if (!days.length) return svg(100, 40);
   const sorted = days.map(d => d[0]).sort();
@@ -179,7 +184,8 @@ export function calendar(days, opts) {
     el('rect', {
       x: col * (o.cell + o.gap), y: row * (o.cell + o.gap),
       width: o.cell, height: o.cell, rx: 2,
-      fill: v ? 'rgba(' + o.color + ',' + (0.14 + 0.86 * t).toFixed(2) + ')' : '#151b25',
+      fill: v ? o.color : 'var(--empty)',
+      'fill-opacity': v ? (0.14 + 0.86 * t).toFixed(2) : 1,
     }, s);
     d.setUTCDate(d.getUTCDate() + 1);
     row++;
@@ -229,18 +235,18 @@ export function sleepBands(nights, opts) {
     const a = Y(shift(toH(n.bed)));
     const b = Y(shift(toH(n.wake)));
     const top = Math.min(a, b), hgt = Math.max(1.5, Math.abs(b - a));
-    el('rect', { x: x - bw / 2, y: top, width: bw, height: hgt, rx: bw / 2.6, fill: '#5b9cff', opacity: 0.62 }, s);
+    el('rect', { x: x - bw / 2, y: top, width: bw, height: hgt, rx: bw / 2.6, fill: 'var(--blue)', opacity: 0.62 }, s);
   });
   [[0, '12:00'], [6, '18:00'], [12, '00:00'], [18, '06:00'], [24, '12:00']].forEach(t => {
-    el('line', { x1: o.padL, y1: Y(t[0]), x2: o.w - 12, y2: Y(t[0]), stroke: '#1e2532' }, s);
-    el('text', { x: o.padL - 8, y: Y(t[0]) + 4, 'text-anchor': 'end', fill: '#7b8798', 'font-size': 10 }, s, t[1]);
+    el('line', { x1: o.padL, y1: Y(t[0]), x2: o.w - 12, y2: Y(t[0]), stroke: 'var(--axis)' }, s);
+    el('text', { x: o.padL - 8, y: Y(t[0]) + 4, 'text-anchor': 'end', fill: 'var(--axis-text)', 'font-size': 10 }, s, t[1]);
   });
   return s;
 }
 
 /** 直方图 */
 export function histogram(hist, opts) {
-  const o = Object.assign({ w: 900, h: 180, min: 30, bin: 5, color: '#ff5c5c' }, opts || {});
+  const o = Object.assign({ w: 900, h: 180, min: 30, bin: 5, color: 'var(--red)' }, opts || {});
   const s = svg(o.w, o.h);
   const max = Math.max.apply(null, hist) || 1;
   const bw = (o.w - 40) / hist.length;
@@ -251,9 +257,9 @@ export function histogram(hist, opts) {
       fill: o.color, opacity: 0.75, rx: 1.5,
     }, s);
   });
-  el('line', { x1: 20, y1: o.h - 28, x2: o.w - 20, y2: o.h - 28, stroke: '#1e2532' }, s);
+  el('line', { x1: 20, y1: o.h - 28, x2: o.w - 20, y2: o.h - 28, stroke: 'var(--axis)' }, s);
   for (let i = 0; i < hist.length; i += 6) {
-    el('text', { x: 20 + i * bw, y: o.h - 10, 'text-anchor': 'middle', fill: '#7b8798', 'font-size': 10 }, s, String(o.min + i * o.bin));
+    el('text', { x: 20 + i * bw, y: o.h - 10, 'text-anchor': 'middle', fill: 'var(--axis-text)', 'font-size': 10 }, s, String(o.min + i * o.bin));
   }
   return s;
 }

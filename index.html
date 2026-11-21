@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>健康档案 · Apple Health 可视化</title>
 <meta name="description" content="在浏览器本地解析 Apple「健康」App 导出的压缩包，生成耳机、心率、睡眠、活动与设备报告。文件不会上传。">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -16,6 +16,10 @@
     <span>健康档案</span>
   </a>
   <nav>
+    <button class="theme-toggle" id="theme" type="button" aria-label="切换深浅色">
+      <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 14.6A8.4 8.4 0 0 1 9.4 3.6a8.4 8.4 0 1 0 11 11Z"/></svg>
+      <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.4 12H2.2M21.8 12h-2.2M6.6 6.6 5 5M19 19l-1.6-1.6M6.6 17.4 5 19M19 5l-1.6 1.6"/></svg>
+    </button>
     <a href="https://github.com/tf-pogo/apple-health-web" target="_blank" rel="noopener" id="gh">GitHub</a>
   </nav>
 </header>
