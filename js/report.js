@@ -1,4 +1,5 @@
 import * as C from './charts.js';
+import { pick, spanOf, PRESETS } from './range.js';
 
 const nf = new Intl.NumberFormat('zh-CN');
 function num(v) { return nf.format(Math.round(v)); }
@@ -76,27 +77,115 @@ const TABS = [
   ['devices', '设备'],
 ];
 
-let R = null;
+let SRC = null;        // 全量结果
+let R = null;          // 当前时间范围的切片
+let UI = null;
+let CUR = 'overview';
+let RANGE = null;      // { from, to }
+
+/** 把当前范围重新切一次并重画：只动当前 tab，不重建整页 */
+function applyRange(from, to) {
+  RANGE = { from, to };
+  R = pick(SRC, from, to);
+  paintHead();
+  renderTab(CUR, UI);
+}
+
+function paintHead() {
+  const days = R.days;
+  UI.title.textContent = days
+    ? '你的身体，' + num(days) + ' 天的记录'
+    : '这段时间没有数据';
+  UI.sub.textContent = R.range.from + ' → ' + R.range.to + ' · ' +
+    num(days) + ' 天有记录 · 心率读数 ' + num(R.hr.n) + ' 次 · 睡眠 ' +
+    R.sleep.nights.length + ' 夜 · 导出时间 ' + SRC.exportDate;
+
+  const bar = document.getElementById('range');
+  if (!bar) return;
+  bar.querySelectorAll('button[data-p]').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.p === RANGE.preset)));
+  const f = bar.querySelector('#rfrom, input[name=from]');
+  const t = bar.querySelector('#rto, input[name=to]');
+  if (f) f.value = R.range.from;
+  if (t) t.value = R.range.to;
+  const hint = bar.querySelector('.range-hint');
+  if (hint) hint.textContent = num(days) + ' 天';
+}
 
 /** 把一个 parse 结果渲染进 ui = { title, sub, tabs, view } */
 export function renderReport(r, ui) {
-  R = r;
-  const total = Object.values(r.counts).reduce((x, y) => x + y, 0);
-  const days = r.hr.day.length;
-  ui.title.textContent = '你身上发生过的 ' + num(total) + ' 条记录';
-  ui.sub.textContent = (r.firstDate || '—') + ' → ' + (r.lastDate || '—') + ' · ' +
-    days + ' 个有数据的日子 · 导出时间 ' + r.exportDate;
+  SRC = r;
+  UI = ui;
+  // 初始范围：URL 上的 ?preset=7d 或 ?from=YYYY-MM-DD&to=YYYY-MM-DD 优先，方便分享/截图
+  const q = new URLSearchParams(location.search);
+  const qp = q.get('preset'), qf = q.get('from'), qt = q.get('to');
+  let from = r.firstDate, to = r.lastDate, preset = 'all';
+  if (qp && PRESETS.some(p => p[0] === qp)) {
+    const s = spanOf(r, qp);
+    from = s.from; to = s.to; preset = qp;
+  } else if (qf || qt) {
+    from = qf || r.firstDate;
+    to = qt || r.lastDate;
+    if (from > to) { const tmp = from; from = to; to = tmp; }
+    preset = 'custom';
+  }
+  RANGE = { from, to, preset };
+  R = pick(r, from, to);
+  paintHead();
 
   ui.tabs.innerHTML = TABS.map(([k, t]) =>
-    '<button role="tab" data-k="' + k + '" aria-selected="' + (k === 'overview') + '">' + t + '</button>'
+    '<button role="tab" data-k="' + k + '" aria-selected="' + (k === CUR) + '">' + t + '</button>'
   ).join('');
   ui.tabs.querySelectorAll('button').forEach(b => {
     b.addEventListener('click', () => {
+      CUR = b.dataset.k;
       ui.tabs.querySelectorAll('button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
-      renderTab(b.dataset.k, ui);
+      renderTab(CUR, ui);
     });
   });
-  renderTab('overview', ui);
+
+  // 时间范围条：预设 + 自定义起止
+  if (!document.getElementById('range')) {
+    const bar = document.createElement('div');
+    bar.id = 'range';
+    bar.className = 'range';
+    bar.innerHTML =
+      '<div class="range-presets">' +
+        PRESETS.map(([k, t]) => '<button type="button" data-p="' + k + '" aria-pressed="false">' + t + '</button>').join('') +
+      '</div>' +
+      '<div class="range-dates">' +
+        '<input type="date" name="from" aria-label="开始日期">' +
+        '<span>→</span>' +
+        '<input type="date" name="to" aria-label="结束日期">' +
+      '</div>' +
+      '<span class="range-hint"></span>';
+    ui.tabs.parentNode.insertBefore(bar, ui.tabs);
+
+    const from = bar.querySelector('input[name=from]');
+    const to = bar.querySelector('input[name=to]');
+    from.min = to.min = r.firstDate;
+    from.max = to.max = r.lastDate;
+
+    bar.querySelectorAll('button[data-p]').forEach(b => {
+      b.addEventListener('click', () => {
+        const s = spanOf(SRC, b.dataset.p);
+        RANGE.preset = b.dataset.p;
+        applyRange(s.from, s.to);
+      });
+    });
+    const manual = () => {
+      let a = from.value || SRC.firstDate;
+      let b2 = to.value || SRC.lastDate;
+      if (a > b2) { const t = a; a = b2; b2 = t; }
+      RANGE.preset = 'custom';
+      applyRange(a, b2);
+    };
+    from.addEventListener('change', manual);
+    to.addEventListener('change', manual);
+    paintHead();
+  }
+
+  renderTab(CUR, ui);
 }
 
 export function renderTab(k, ui) {
@@ -113,30 +202,47 @@ export function renderTab(k, ui) {
 
 /* ---------------- 概览 ---------------- */
 
+/** 分钟 → 人话 */
+function mins(v) {
+  if (!v) return '0 分钟';
+  if (v < 60) return Math.round(v) + ' 分钟';
+  return Math.floor(v / 60) + ' 小时 ' + Math.round(v % 60) + ' 分';
+}
+
 function viewOverview(r, host) {
   const total = Object.values(r.counts).reduce((a, b) => a + b, 0);
   const typeCount = Object.keys(r.counts).filter(k => k.indexOf('Workout:') !== 0).length;
-  const span = r.hr.day.length
-    ? Math.round((new Date(r.hr.day[r.hr.day.length - 1][0]) - new Date(r.hr.day[0][0])) / 86400000) + 1
-    : 0;
+  const days = r.days || r.hr.day.length || 1;
+  const ns = r.sleep.nights;
+  const sleepSum = ns.reduce((a, n) => a + n.asleep, 0);
+  const wkMin = r.workouts.reduce((a, w) => a + (w.dur || 0), 0);
 
-  let h = '<div class="grid">' +
-    stat(num(total), '条记录', num(r.meta.lines) + ' 行 XML') +
-    stat(typeCount, '种数据类型', '有数据 ' + r.hr.day.length + ' 天') +
-    stat(num(r.hr.n), '次心跳采样', '平均 ' + r.hr.avg + ' bpm') +
-    stat(r.sleep.nights.length, '个夜晚', '平均 ' + dec(r.sleep.nights.reduce((a, n) => a + n.asleep, 0) / (r.sleep.nights.length || 1)) + ' 小时') +
-    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.day.length ? r.steps.total / r.steps.day.length : 0)) +
-    stat(r.hp.hours ? Math.round(r.hp.hours) : 0, '小时戴耳机', num(r.hp.n) + ' 条音量采样') +
-    '</div>';
+  // 这一段时间的六个大数：心跳、睡眠、日光、步数、距离、能量
+  let h = '<div class="grid six">' +
+    stat(num(r.hr.n), '次心率读数', '平均 ' + r.hr.avg + ' bpm · 最高 ' + r.hr.max) +
+    stat(num(sleepSum) + ' 小时', '累计睡眠', ns.length + ' 夜 · 平均 ' +
+      dec(ns.length ? sleepSum / ns.length : 0) + ' 小时') +
+    stat(num(r.light.total / 60) + ' 小时', '晒太阳', num(r.light.total) + ' 分钟 · 按手表的日光暴露统计') +
+    stat(num(r.steps.total), '步', '日均 ' + num(r.steps.total / days)) +
+    stat(num(r.dist.total) + ' km', '走过和跑过', '步行与跑步距离') +
+    stat(num(r.energy.total), '千卡', '活动能量') +
+    '</div>' +
+    '<p class="summary-line">' +
+      '这段时间还戴了 <b>' + (r.hp.hours ? num(r.hp.hours) + ' 小时' : '—') + '</b> 耳机（' + num(r.hp.n) + ' 条音量采样）' +
+      ' · 做了 <b>' + r.workouts.length + ' 次</b>运动' +
+        (r.workouts.length ? '（' + Math.round(wkMin) + ' 分钟）' : '') +
+      ' · 静息心率 <b>' + r.rhr.avg + ' bpm</b>' +
+      ' · 血氧 <b>' + r.spo2.avg + '%</b>' +
+    '</p>';
 
-  // 记录类型 Top
+  // 记录类型 Top（按全量统计，换范围不改）
   const types = Object.entries(r.counts)
     .filter(([k]) => k.indexOf('Workout:') !== 0)
     .sort((a, b) => b[1] - a[1]).slice(0, 12);
-  h += card('记录最多的数据', num(total) + ' 条 / ' + typeCount + ' 种',
+  h += card('记录最多的数据', '全量 ' + num(total) + ' 条 / ' + typeCount + ' 种',
     '<div id="c-types" class="chart"></div>',
-    '这是整份导出里出现频次最高的 12 类记录。Apple Watch 每分钟的心率采样通常占掉一半以上。');
-  h += card('数据从哪来', r.sources.length + ' 个来源',
+    '这是整份导出里出现频次最高的 12 类记录，不随时间范围变化。Apple Watch 每分钟的心率采样通常占掉一半以上。');
+  h += card('数据从哪来', '全量 ' + r.sources.length + ' 个来源',
     '<div id="c-sources" class="chart"></div>',
     '同一部 iPhone 上装过的健康类 App 都会往里写数据，所以来源往往比设备多。');
 
@@ -163,7 +269,7 @@ function viewAudio(r, host) {
     stat(num(hp.over85), '次超过 85 dB', '其中 ' + num(hp.over90) + ' 次 >90 dB') +
     '</div>';
 
-  h += card('每副耳机用了多久', hp.devices.length + ' 副',
+  h += card('每副耳机用了多久', '全量 ' + hp.devices.length + ' 副',
     '<div id="c-dev" class="chart"></div>',
     '时长按每条音量采样的持续区间累加，跟 iOS 里「耳机音量」的统计口径一致。');
   h += card('一天里什么时候听得最响', num(hp.n) + ' 次采样',

@@ -18,6 +18,9 @@ const VO2 = 'HKQuantityTypeIdentifierVO2Max';
 const WEIGHT = 'HKQuantityTypeIdentifierBodyMass';
 const HEIGHT = 'HKQuantityTypeIdentifierHeight';
 const SLEEP = 'HKCategoryTypeIdentifierSleepAnalysis';
+const LIGHT = 'HKQuantityTypeIdentifierTimeInDaylight';
+const STAND = 'HKQuantityTypeIdentifierAppleStandTime';
+const EXER = 'HKQuantityTypeIdentifierAppleExerciseTime';
 
 const HR_BIN = 5, HR_MIN = 30, HR_MAX = 220;
 
@@ -56,6 +59,7 @@ export function createAggregator() {
     sleep: { segs: 0, nights: new Map() },
     workouts: [],
     actsum: [],
+    byDay: new Map(),
     cur: null,
     eventHigh: [], eventLow: [],
   };
@@ -68,6 +72,29 @@ function bump(obj, key) {
 
 function addTo(map, key, v) {
   map.set(key, (map.get(key) || 0) + v);
+}
+
+/**
+ * 每天一格的原始计数。时间范围筛选靠它：切范围时只在这个索引上求和，
+ * 不用回头重扫 200 万行 XML。
+ * hrH / hpH 是扁平的 48 个数：前 24 个是每小时的采样数，后 24 个是数值之和。
+ */
+function drec(a, day) {
+  let d = a.byDay.get(day);
+  if (!d) {
+    d = {
+      hrN: 0, hrS: 0, hrMin: Infinity, hrMax: 0,
+      hrH: new Array(48).fill(0), hrHist: Object.create(null),
+      hpN: 0, hpS: 0, hpMax: 0, hpDur: 0, hpO80: 0, hpO85: 0, hpO90: 0,
+      hpH: new Array(48).fill(0),
+      steps: 0, dist: 0, energy: 0, light: 0, stand: 0, exer: 0,
+      spo2N: 0, spo2S: 0, spo2Min: 100, spo2Low: 0,
+      respN: 0, respS: 0,
+      rhrSum: 0, rhrN: 0, hrvSum: 0, hrvN: 0,
+    };
+    a.byDay.set(day, d);
+  }
+  return d;
 }
 
 /** 处理一行 XML */
@@ -121,20 +148,32 @@ export function feedLine(a, line) {
         if (b >= 0 && b < a.hr.hist.length) a.hr.hist[b]++;
         const d = a.hr.day.get(day) || { s: 0, n: 0 };
         d.s += v; d.n++; a.hr.day.set(day, d);
+        const kd = drec(a, day);
+        kd.hrN++; kd.hrS += v;
+        if (v < kd.hrMin) kd.hrMin = v;
+        if (v > kd.hrMax) kd.hrMax = v;
+        if (hh >= 0 && hh < 24) { kd.hrH[hh]++; kd.hrH[24 + hh] += v; }
+        if (b >= 0 && b < a.hr.hist.length) kd.hrHist[b] = (kd.hrHist[b] || 0) + 1;
         break;
       }
       case RHR: {
         const v = +attr(tag, 'value');
         if (!isFinite(v)) return;
+        const d = attr(tag, 'startDate').slice(0, 10);
         a.rhr.n++; a.rhr.sum += v;
-        a.rhr.day.set(attr(tag, 'startDate').slice(0, 10), v);
+        a.rhr.day.set(d, v);
+        const kd = drec(a, d);
+        kd.rhrSum += v; kd.rhrN++;
         break;
       }
       case HRV: {
         const v = +attr(tag, 'value');
         if (!isFinite(v)) return;
+        const d = attr(tag, 'startDate').slice(0, 10);
         a.hrv.n++; a.hrv.sum += v;
-        a.hrv.day.set(attr(tag, 'startDate').slice(0, 10), v);
+        a.hrv.day.set(d, v);
+        const kd = drec(a, d);
+        kd.hrvSum += v; kd.hrvN++;
         break;
       }
       case SPO2: {
@@ -145,11 +184,19 @@ export function feedLine(a, line) {
         if (v < a.spo2.min) a.spo2.min = v;
         if (v > a.spo2.max) a.spo2.max = v;
         if (v < 95) a.spo2.low++;
+        const kd = drec(a, attr(tag, 'startDate').slice(0, 10));
+        kd.spo2N++; kd.spo2S += v;
+        if (v <= kd.spo2Min) kd.spo2Min = v;
+        if (v < 95) kd.spo2Low++;
         break;
       }
       case RESP: {
         const v = +attr(tag, 'value');
-        if (isFinite(v)) { a.resp.n++; a.resp.sum += v; }
+        if (isFinite(v)) {
+          a.resp.n++; a.resp.sum += v;
+          const kd = drec(a, attr(tag, 'startDate').slice(0, 10));
+          kd.respN++; kd.respS += v;
+        }
         break;
       }
       case VO2: {
@@ -181,6 +228,15 @@ export function feedLine(a, line) {
         if (v > 85) a.hp.over85++;
         if (v > 90) a.hp.over90++;
         addTo(a.hp.day, st.slice(0, 10), dur);
+        {
+          const kd = drec(a, st.slice(0, 10));
+          kd.hpN++; kd.hpS += v; kd.hpDur += dur;
+          if (v > kd.hpMax) kd.hpMax = v;
+          if (hh >= 0 && hh < 24) { kd.hpH[hh]++; kd.hpH[24 + hh] += v; }
+          if (v > 80) kd.hpO80++;
+          if (v > 85) kd.hpO85++;
+          if (v > 90) kd.hpO90++;
+        }
         if (dn) {
           const d = a.hp.devices[dn] || { n: 0, sum: 0, max: 0, dur: 0 };
           d.n++; d.sum += v; d.dur += dur; if (v > d.max) d.max = v;
@@ -201,11 +257,15 @@ export function feedLine(a, line) {
         const day = attr(tag, 'startDate').slice(0, 10);
         a.steps.n++; a.steps.total += v;
         addTo(a.steps.day, day, v);
+        drec(a, day).steps += v;
         break;
       }
       case DIST: {
         const v = +attr(tag, 'value');
-        if (isFinite(v)) a.dist.total += v;
+        if (isFinite(v)) {
+          a.dist.total += v;
+          drec(a, attr(tag, 'startDate').slice(0, 10)).dist += v;
+        }
         break;
       }
       case ENERGY: {
@@ -214,6 +274,7 @@ export function feedLine(a, line) {
         const day = attr(tag, 'startDate').slice(0, 10);
         a.energy.total += v;
         addTo(a.energy.day, day, v);
+        drec(a, day).energy += v;
         break;
       }
       case SLEEP: {
@@ -255,6 +316,17 @@ export function feedLine(a, line) {
             n.nightEnd = en;
           }
         }
+        break;
+      }
+      case LIGHT:
+      case STAND:
+      case EXER: {
+        const v = +attr(tag, 'value');
+        if (!isFinite(v)) return;
+        const kd = drec(a, attr(tag, 'startDate').slice(0, 10));
+        if (type === LIGHT) kd.light += v;
+        else if (type === STAND) kd.stand += v;
+        else kd.exer += v;
         break;
       }
       default:
@@ -401,6 +473,41 @@ export function finalize(a) {
     .map(([d, m]) => [d, +(m / 60).toFixed(2)])
     .sort((x, y) => (x[0] < y[0] ? -1 : 1));
 
+  // 每天一格的索引：换时间范围时只在这里求和，不回头重扫 XML
+  const byDay = Object.create(null);
+  let lightAll = 0, standAll = 0, exerAll = 0;
+  for (const [d, o] of a.byDay) {
+    lightAll += o.light; standAll += o.stand; exerAll += o.exer;
+    byDay[d] = {
+      hrN: o.hrN,
+      hrS: Math.round(o.hrS),
+      hrMin: o.hrMin === Infinity ? 0 : o.hrMin,
+      hrMax: o.hrMax,
+      hrH: o.hrH.map(Math.round),
+      hrB: o.hrHist,
+      hpN: o.hpN,
+      hpS: Math.round(o.hpS),
+      hpMax: +o.hpMax.toFixed(1),
+      hpDur: +o.hpDur.toFixed(2),
+      hpO80: o.hpO80, hpO85: o.hpO85, hpO90: o.hpO90,
+      hpH: o.hpH.map(Math.round),
+      steps: Math.round(o.steps),
+      dist: +o.dist.toFixed(3),
+      energy: Math.round(o.energy),
+      light: Math.round(o.light),
+      stand: Math.round(o.stand),
+      exer: Math.round(o.exer),
+      spo2N: o.spo2N,
+      spo2S: Math.round(o.spo2S),
+      spo2Min: o.spo2N ? o.spo2Min : 0,
+      spo2Low: o.spo2Low,
+      respN: o.respN,
+      respS: +o.respS.toFixed(1),
+      rhr: o.rhrN ? +(o.rhrSum / o.rhrN).toFixed(1) : 0,
+      hrv: o.hrvN ? +(o.hrvSum / o.hrvN).toFixed(1) : 0,
+    };
+  }
+
   const sources = Object.entries(a.sources).sort((x, y) => y[1] - x[1]);
   const devices = Object.entries(a.devices).sort((x, y) => y[1] - x[1]);
 
@@ -475,5 +582,9 @@ export function finalize(a) {
     sleep: { segs: a.sleep.segs, nights },
     workouts,
     actsum: a.actsum.sort((x, y) => (x.d < y.d ? -1 : 1)),
+    light: { total: Math.round(lightAll) },
+    stand: { total: Math.round(standAll) },
+    exer: { total: Math.round(exerAll) },
+    byDay,
   };
 }

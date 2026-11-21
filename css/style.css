@@ -227,6 +227,50 @@ main {
   font-weight: 600;
 }
 
+/* ---------- 时间范围 ---------- */
+.range {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.range-presets { display: flex; gap: 4px; }
+.range-presets button {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #0b1017;
+  color: var(--muted);
+  cursor: pointer;
+}
+.range-presets button:hover { color: var(--text); border-color: #2d3b50; }
+.range-presets button[aria-pressed="true"] {
+  color: #08120c;
+  background: var(--green);
+  border-color: var(--green);
+  font-weight: 600;
+}
+.range-dates { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13px; }
+.range-dates input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #0b1017;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 8px;
+  color-scheme: dark;
+}
+.range-dates input::-webkit-calendar-picker-indicator { filter: invert(.6); cursor: pointer; }
+.range-hint { margin-left: auto; font-size: 12px; color: var(--dim); }
+
 /* ---------- 卡片 ---------- */
 .grid {
   display: grid;
@@ -234,6 +278,15 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
   margin-bottom: 22px;
 }
+/* 概览的六个大数：宽屏正好一行六张，窄屏自动退成三张、两张 */
+.grid.six { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }
+.summary-line {
+  margin: -6px 0 24px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.summary-line b { color: var(--text); font-weight: 600; }
 .stat {
   background: var(--card);
   border: 1px solid var(--line);
