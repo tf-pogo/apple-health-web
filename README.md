@@ -6,6 +6,10 @@
 
 > 同类项目 [PodHours](https://podhours.app) 只做耳机使用时长。这个项目想要的是全部：心脏、耳朵、睡眠、活动、设备编年史。
 
+![落地页](docs/screenshot.png)
+
+在线版：<https://tf-pogo.github.io/apple-health-web/>
+
 ---
 
 ## 六个视图
